@@ -1,18 +1,69 @@
-import os
 import json
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-import matplotlib.ticker as ticker
+
+
+def draw_precision_recall_curve(data):
+    precision = {}
+    recall = {}
+
+    for threshold, stats in data.items():
+        for tag, values in stats.items():
+            tp = values['true-positive']
+            fp = values['false-positive']
+            fn = values['false-negative']
+
+            if tp + fp != 0 and tp + fn != 0:
+                precision_value = tp / (tp + fp)
+                recall_value = tp / (tp + fn)
+
+                if tag not in precision:
+                    precision[tag] = []
+                    recall[tag] = []
+
+                precision[tag].append(precision_value)
+                recall[tag].append(recall_value)
+
+            else:
+                print('TP+FP or TP+FN is 0 for tag: ' + tag + ' at threshold: ' + str(threshold))
+
+    # prepend 0 to the lists
+    # for tag in precision.keys():
+    #     precision[tag] = precision[tag] + [1]
+    #     recall[tag] = recall[tag] + [0]
+
+    plt.figure(figsize=(13, 10))
+
+    for tag in precision.keys():
+        sns.lineplot(x=recall[tag], y=precision[tag], marker='o', label=tag, ci=None)
+
+    print(precision)
+    print(recall)
+
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall curves')
+    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
+
+    plt.tight_layout()
+
+    plt.savefig(f'{dataset_dir_path}precision-recall-{set_name}.png')
+
+    print('Saved figure: ' + f'{dataset_dir_path}precision-recall-{set_name}.png')
+
+    plt.show()
 
 
 def draw_confusion_matrices(data, c12n_category, label_type, dataset_dir_path, set_name):
 
+    conf_level = 0.5
+
     if not dataset_dir_path.endswith('/'):
         dataset_dir_path += '/'
 
-    categories = list(data['category_to_prediction_stats'].keys())
+    categories = list(data[conf_level]['category_to_prediction_stats'].keys())
     categories.sort()
 
     n = len(categories)
@@ -33,7 +84,7 @@ def draw_confusion_matrices(data, c12n_category, label_type, dataset_dir_path, s
                                      [stats['false-positive'], stats['true-negative']]])
 
         # Calculate precision, recall, and F1 score
-        tp, fp, fn, tn = confusion_matrix.flatten()
+        tp, fn, fp, tn = confusion_matrix.flatten()
         precision = tp / (tp + fp) if tp + fp > 0 else 0
         recall = tp / (tp + fn) if tp + fn > 0 else 0
         f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
@@ -61,7 +112,7 @@ def draw_confusion_matrices(data, c12n_category, label_type, dataset_dir_path, s
     plt.subplots_adjust(wspace=0.5, hspace=0.5)
 
     # Show the plot
-    plt.savefig(f'{dataset_dir_path}inference-stats-{set_name}.png')
+    plt.savefig(f'{dataset_dir_path}inference-stats-{set_name}-masked.png')
 
     print('Saved figure: ' + f'{dataset_dir_path}inference-stats-{set_name}.png')
 
@@ -96,4 +147,5 @@ if __name__ == '__main__':
     c12n_category = 'tags'
     label_type = 'surfaceproblem'
 
-    draw_confusion_matrices(all_stats, c12n_category, label_type, dataset_dir_path, set_name)
+    # draw_confusion_matrices(all_stats, c12n_category, label_type, dataset_dir_path, set_name)
+    draw_precision_recall_curve(all_stats['category_to_prediction_stats'])
