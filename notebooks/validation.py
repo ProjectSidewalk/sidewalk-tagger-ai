@@ -129,13 +129,9 @@ image_dimension = 256
 # This is what DinoV2 sees
 target_size = (image_dimension, image_dimension)
 
-n_incorrect_predictions_to_filenames = {}
-category_to_true_positive_counts = {}
-category_to_false_positive_counts = {}
-category_to_false_negative_counts = {}
 
-category_to_prediction_stats = {}
-category_to_prediction_details = {}
+confidence_levels = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1]
+
 
 # enum to track the classification categories
 C12N_CATEGORIES = {
@@ -153,15 +149,14 @@ inference_set_dir_name = 'test'
 # temporarily skipping the cities with messy data
 skip_cities = ['cdmx', 'spgg', 'newberg', 'columbus']
 
-# dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-viz-test'  # example: crops-surfaceproblem-tags-archive
 dataset_dirname = 'crops-' + label_type + '-' + c12n_category  # example: crops-surfaceproblem-tags-archive
+# dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-validated'  # example: crops-surfaceproblem-tags-archive
 dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags-archive
 
 inference_dataset_dir = Path(dataset_dir_path + "/" + inference_set_dir_name)
 
-# model_name = 'cls-b-' + label_type + '-' + c12n_category + '-best.pth'
 model_name = 'cls-b-' + label_type + '-' + c12n_category + '-best.pth'
-
+# model_name = 'cls-b-obstacle-tags-masked-best.pth'
 # ------------------------------
 
 local_directory = os.getcwd()
@@ -231,6 +226,10 @@ def images_loader(dir_path, batch_size, imgsz, transform):
                 if len(labels_for_image) == 0:
                     continue
 
+                if labels_for_image['label_type_validation'].values[0] != 'agree':
+                    print('Disagreed or unsure label: ' + filename)
+                    continue
+
                 images.append(torch.tensor(np.array([img], dtype=np.float32), requires_grad=True))
                 labels.append(
                     torch.tensor(np.array([labels_for_image.values[0][c12n_category_offset:]], dtype=np.float32), requires_grad=True))
@@ -247,35 +246,38 @@ def data_loader(dir_path, batch_size, imgsz, transform):
 
 # -----------------------------------------------------------------
 
-label_type_to_tags = {
-    'surfaceproblem': ['brick-cobblestone', 'bumpy', 'construction', 'cracks', 'grass', 'height-difference',
-                       'narrow-sidewalk', 'rail-tram-track', 'sand-gravel', 'uncovered-manhole', 'uneven-slanted',
-                       'utility-panel', 'very-broken'],
-    'nosidewalk': ['covered-walkway', 'ends-abruptly', 'gravel-dirt-road', 'pedestrian-lane-marking',
-                   'shared-pedestrian-car-space', 'street-has-a-sidewalk', 'street-has-no-sidewalks'],
-    'curbramp': ['missing-tactile-warning', 'narrow', 'not-enough-landing-space', 'not-level-with-street',
-                 'parallel-lines', 'points-into-traffic', 'pooled-water', 'steep', 'surface-problem',
-                 'tactile-warning'],
-    'nocurbramp': ['alternate-route-present', 'no-alternate-route', 'unclear-if-needed'],
-    'obstacle': ['construction', 'fire-hydrant', 'garage-entrance', 'height-difference', 'litter-garbage', 'narrow', 'outdoor-dining-area', 'parked-bike', 'parked-car', 'parked-scooter-motorcycle', 'pole', 'sign', 'stairs', 'street-vendor', 'trash-recycling-can', 'tree', 'vegetation']
-    # ['construction', 'fire-hydrant', 'height-difference', 'litter-garbage', 'narrow', 'parked-bike', 'parked-car', 'parked-scooter-motorcycle', 'pole', 'sign', 'stairs', 'trash-can', 'tree', 'vegetation']
-}
 
 serverity_labels = ['s-1', 's-2', 's-3', 's-4', 's-5']
 
 # todo this needs a better name!
 labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
-# if c12n_category == C12N_CATEGORIES['TAGS']:
-#     labels_ref_for_run = label_type_to_tags[label_type]
-# elif c12n_category == C12N_CATEGORIES['SEVERITY']:
-#     labels_ref_for_run = serverity_labels
 
+
+all_n_incorrect_predictions_to_filenames = {}
+all_category_to_true_positive_counts = {}
+all_category_to_false_positive_counts = {}
+all_category_to_false_negative_counts = {}
+all_category_to_true_negative_counts = {}
+
+all_category_to_prediction_stats = {}
+all_category_to_prediction_details = {}
+
+
+images_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'inference')
 
 # -----------------------------------------------------------------
-def inference_on_validation_data(inference_model, n_test_images=1):
-    val_image_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'inference')
+def inference_on_validation_data(inference_model, confidence_level=0.5):
 
-    for img_label_filename in val_image_and_labels:
+    # we track these for each confidence level
+    n_incorrect_predictions_to_filenames = {}
+    category_to_true_positive_counts = {}
+    category_to_false_positive_counts = {}
+    category_to_false_negative_counts = {}
+
+    category_to_prediction_stats = {}
+    category_to_prediction_details = {}
+
+    for img_label_filename in images_and_labels:
 
         img_tensor, labels, filename = img_label_filename
 
@@ -294,8 +296,9 @@ def inference_on_validation_data(inference_model, n_test_images=1):
             elif c12n_category == C12N_CATEGORIES['TAGS']:
                 probabilities = torch.sigmoid(output_tensor)
 
+
             # Convert probabilities to predicted classes
-            predicted_classes = probabilities > 0.5
+            predicted_classes = probabilities > confidence_level
             # Calculate accuracy
             n_labels = labels.size(1)
 
@@ -322,6 +325,7 @@ def inference_on_validation_data(inference_model, n_test_images=1):
             for x in range(len(ground_truth_labels_list)):
                 if ground_truth_labels_list[x] == 1.0:
                     gt_labels_for_crop.append(labels_ref_for_run[x])
+
 
             # updating true positives
             for elem in predicted_classes_for_crop:
@@ -371,6 +375,15 @@ def inference_on_validation_data(inference_model, n_test_images=1):
             print("{} | Correct percent = {} | Predicted = {} vs. "
                   "Ground Truth = {}:".format(filename, correct_predictions, predicted_classes_for_crop, gt_labels_for_crop))
 
+    # update the global variables
+    all_n_incorrect_predictions_to_filenames[conf_level] = n_incorrect_predictions_to_filenames
+    all_category_to_true_positive_counts[conf_level] = category_to_true_positive_counts
+    all_category_to_false_positive_counts[conf_level] = category_to_false_positive_counts
+    all_category_to_false_negative_counts[conf_level] = category_to_false_negative_counts
+    # all_category_to_true_negative_counts[confidence_threshold]  |  add true negative here
+    all_category_to_prediction_stats[conf_level] = category_to_prediction_stats
+    all_category_to_prediction_details[conf_level] = category_to_prediction_details
+
 
 nc = len(labels_ref_for_run)  # number of classes.
 
@@ -382,38 +395,43 @@ classifier.load_state_dict(
 classifier = classifier.to(device)
 classifier.eval()
 
-inference_on_validation_data(inference_model=classifier, n_test_images=10)
+# runs the inference for all confidence levels
+for conf_level in confidence_levels:
+    inference_on_validation_data(inference_model=classifier, confidence_level=conf_level)
 
+# output_file_name = dataset_dir_path + '/inference-stats' + '-' + inference_set_dir_name + '-masked.json'
+output_file_name = dataset_dir_path + '/inference-stats' + '-' + inference_set_dir_name + '.json'
 
 # save the results to a file
-with open(dataset_dir_path + '/inference-stats' + '-' + inference_set_dir_name + '.json', 'w') as f:
+with open(output_file_name, 'w') as f:
 
     all_stats = {
-        'n_incorrect_predictions_to_filenames': n_incorrect_predictions_to_filenames,
-        'category_to_prediction_stats': category_to_prediction_stats,
-        'category_to_prediction_details': category_to_prediction_details
+        'n_incorrect_predictions_to_filenames': all_n_incorrect_predictions_to_filenames,
+        'category_to_prediction_stats': all_category_to_prediction_stats,
+        'category_to_prediction_details': all_category_to_prediction_details
     }
 
     f.write(json.dumps(all_stats, indent=4))
 
     draw_confusion_matrices(all_stats, c12n_category, label_type, dataset_dir_path, inference_set_dir_name)
 
-    for key in n_incorrect_predictions_to_filenames:
-        print("Number of incorrect predictions: {} | Count: {}".format(key, len(n_incorrect_predictions_to_filenames[key])))
+    for conf_level in all_n_incorrect_predictions_to_filenames:
+        for key in all_n_incorrect_predictions_to_filenames[conf_level]:
+            print("Number of incorrect predictions: {} | Count: {} | Confidence level: {}".format(key, len(all_n_incorrect_predictions_to_filenames[conf_level][key]), conf_level))
 
     print("-------------------")
-    print("True Positives:")
-
-    for category in category_to_true_positive_counts:
-        print(category + ": " + str(len(category_to_true_positive_counts[category])))
-
-    print("-------------------")
-    print("False Positives:")
-
-    for category in category_to_false_positive_counts:
-        print(category + ": " + str(len(category_to_false_positive_counts[category])))
-
-    print("-------------------")
-    print("False Negatives:")
-    for category in category_to_false_negative_counts:
-        print(category + ": " + str(len(category_to_false_negative_counts[category])))
+    # print("True Positives:")
+    #
+    # for category in category_to_true_positive_counts:
+    #     print(category + ": " + str(len(category_to_true_positive_counts[category])))
+    #
+    # print("-------------------")
+    # print("False Positives:")
+    #
+    # for category in category_to_false_positive_counts:
+    #     print(category + ": " + str(len(category_to_false_positive_counts[category])))
+    #
+    # print("-------------------")
+    # print("False Negatives:")
+    # for category in category_to_false_negative_counts:
+    #     print(category + ": " + str(len(category_to_false_negative_counts[category])))
