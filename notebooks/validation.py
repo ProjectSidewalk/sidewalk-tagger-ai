@@ -10,7 +10,11 @@ import numpy as np
 from torch import nn, optim
 from copy import deepcopy
 import sys
-from visualize import draw_confusion_matrices
+from sklearn.metrics import precision_recall_curve, auc, PrecisionRecallDisplay
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, RocCurveDisplay
+from sklearn.metrics import average_precision_score, accuracy_score, hamming_loss, f1_score
+import timm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -104,8 +108,32 @@ class DinoVisionTransformerClassifier(nn.Module):
         return x
 
 
+class CLIP_Classifier(nn.Module):
+    def __init__(self, model_name='', n_target_classes=7):
+        super().__init__()
+        self.model = timm.create_model(model_name=model_name, pretrained=True, in_chans=3)
+        #         Replace the final head layers in model with our own Linear layer
+        num_features = self.model.num_features
+        self.model.head = nn.Linear(num_features, 256)
+        self.fully_connect = nn.Sequential(nn.Linear(256, 128),
+                                           nn.ReLU(),
+                                           nn.Linear(128, n_target_classes))
+
+        # self.model.load_state_dict(torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device)))
+
+        # self.transformer = deepcopy(self.model)
+
+    def forward(self, image):
+        x = self.model(image)
+        # Using dropout functions to randomly shutdown some of the nodes in hidden layers to prevent overfitting.
+        #         x = self.dropout(x)
+        #         # Concatenate the metadata into the results.
+        x = self.fully_connect(x)
+        return x
+
+
 def get_labels_ref_for_run(inference_set_dir):
-    csv_file_path = os.path.join(inference_set_dir, '_classes.csv')
+    csv_file_path = os.path.join(inference_set_dir, 'test.csv')
     label_data = pd.read_csv(csv_file_path)
 
     # get the header row
@@ -121,16 +149,13 @@ def get_labels_ref_for_run(inference_set_dir):
     global c12n_category_offset
     c12n_category_offset = validated_by_index + 1
 
+    if params['label_type'] == 'obstacle':
+        if len(labels_ref_for_run) == 20:
+            labels_ref_for_run = labels_ref_for_run[:-3]
+        else:
+            raise ValueError('Unexpected number of labels for obstacle')
+
     return labels_ref_for_run
-
-
-image_dimension = 256
-
-# This is what DinoV2 sees
-target_size = (image_dimension, image_dimension)
-
-
-confidence_levels = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1]
 
 
 # enum to track the classification categories
@@ -139,24 +164,54 @@ C12N_CATEGORIES = {
     'SEVERITY': 'severity',
 }
 
+MODEL_PREFIXES = {
+    'CLIP': 'clip',
+    'DINO': 'dino',
+}
+
 # ------------------------------
 # all the parameters to be customized for the run
 # ------------------------------
-label_type = 'surfaceproblem'
-c12n_category = C12N_CATEGORIES['TAGS']
-inference_set_dir_name = 'test'
+
+params = {
+    'label_type': 'curbramp',
+    'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
+    'dataset_type': 'validated',  # 'unvalidated' or 'validated'
+
+    # these don't really change for now
+    'c12n_category': C12N_CATEGORIES['TAGS'],
+    'inference_set_dir_name': 'test',
+}
+
+# ------------------------------
+
+# suppress the tags that have less than the threshold count in the plot
+suppress_thresholds = {
+    'crosswalk': 10,
+    'obstacle': 10,
+    'surfaceproblem': 10,
+    'curbramp': 10
+}
+
+image_dimension = 256
+
+if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
+    image_dimension = 224
+
+# This is what DinoV2 sees
+target_size = (image_dimension, image_dimension)
 
 # temporarily skipping the cities with messy data
-skip_cities = ['cdmx', 'spgg', 'newberg', 'columbus']
+# skip_cities = ['cdmx', 'spgg', 'newberg', 'columbus']
+skip_cities = []
 
-dataset_dirname = 'crops-' + label_type + '-' + c12n_category  # example: crops-surfaceproblem-tags-archive
+dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags-archive
 # dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-validated'  # example: crops-surfaceproblem-tags-archive
 dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags-archive
 
-inference_dataset_dir = Path(dataset_dir_path + "/" + inference_set_dir_name)
+inference_dataset_dir = Path(dataset_dir_path + "/" + params['inference_set_dir_name'])
 
-model_name = 'cls-b-' + label_type + '-' + c12n_category + '-best.pth'
-# model_name = 'cls-b-obstacle-tags-masked-best.pth'
+model_name = 'models/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-cls-b-' + params['label_type'] + '-' + params['c12n_category'] + '-best.pth'
 # ------------------------------
 
 local_directory = os.getcwd()
@@ -168,18 +223,14 @@ if torch.cuda.is_available():
 else:
     print("GPU not available")
 
+
+if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
+    img_resize_multiple = 32
+else:
+    img_resize_multiple = 14
+
 data_transforms = {
-    "train": transforms.Compose(
-        [
-            ResizeAndPad(target_size, 14),
-            # transforms.RandomRotation(360),
-            # transforms.RandomHorizontalFlip(),
-            # transforms.RandomVerticalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ]
-    ),
-    "inference": transforms.Compose([ResizeAndPad(target_size, 14),
+    "inference": transforms.Compose([ResizeAndPad(target_size, img_resize_multiple),
                                      transforms.ToTensor(),
                                      transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
                                      ])
@@ -191,7 +242,7 @@ c12n_category_offset = 8
 # it's okay if the csv contains more filenames than the images in the directory
 # we will only load the images that are present in the directory and query the csv for labels
 def images_loader(dir_path, batch_size, imgsz, transform):
-    file_path = os.path.join(dir_path, '_classes.csv')
+    file_path = os.path.join(dir_path, 'test.csv')
     label_data = pd.read_csv(file_path)
 
     filenames = []
@@ -246,9 +297,6 @@ def data_loader(dir_path, batch_size, imgsz, transform):
 
 # -----------------------------------------------------------------
 
-
-serverity_labels = ['s-1', 's-2', 's-3', 's-4', 's-5']
-
 # todo this needs a better name!
 labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
 
@@ -265,173 +313,203 @@ all_category_to_prediction_details = {}
 
 images_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'inference')
 
+
 # -----------------------------------------------------------------
-def inference_on_validation_data(inference_model, confidence_level=0.5):
+def inference_on_validation_data(inference_model):
 
-    # we track these for each confidence level
-    n_incorrect_predictions_to_filenames = {}
-    category_to_true_positive_counts = {}
-    category_to_false_positive_counts = {}
-    category_to_false_negative_counts = {}
+    y_true = []
+    y_pred = []
 
-    category_to_prediction_stats = {}
-    category_to_prediction_details = {}
+    for idx in range(len(images_and_labels)):
 
-    for img_label_filename in images_and_labels:
+        img_label_filename = images_and_labels[idx]
 
         img_tensor, labels, filename = img_label_filename
+
+        print('Processing image. Index: {}, Filename: {}'.format(idx, filename))
 
         input_tensor = img_tensor.to(device)
         labels_tensor = labels.to(device)
 
+        y_true.append(labels.tolist()[0])
+
         # run model on input image data
         with torch.no_grad():
-            embeddings = inference_model.transformer(input_tensor)
-            x = inference_model.transformer.norm(embeddings)
-            output_tensor = inference_model.classifier(x)
+            if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
+                output_tensor = inference_model(input_tensor)
+            else:
+                embeddings = inference_model.transformer(input_tensor)
+                x = inference_model.transformer.norm(embeddings)
+                output_tensor = inference_model.classifier(x)
 
             # Convert outputs to probabilities using sigmoid
-            if c12n_category == C12N_CATEGORIES['SEVERITY']:
+            if params['c12n_category'] == C12N_CATEGORIES['SEVERITY']:
                 probabilities = torch.softmax(output_tensor, dim=1)
-            elif c12n_category == C12N_CATEGORIES['TAGS']:
+            elif params['c12n_category'] == C12N_CATEGORIES['TAGS']:
                 probabilities = torch.sigmoid(output_tensor)
 
-
-            # Convert probabilities to predicted classes
-            predicted_classes = probabilities > confidence_level
-            # Calculate accuracy
-            n_labels = labels.size(1)
-
-            n_incorrect_predictions = (predicted_classes != labels_tensor.byte()).sum().item()
-            correct_predictions = ((predicted_classes == labels_tensor.byte()).sum().item()) / n_labels
-
-            # updating number of incorrect predictions to file names
-            if n_incorrect_predictions in n_incorrect_predictions_to_filenames:
-                n_incorrect_predictions_to_filenames[n_incorrect_predictions].append(filename)
-            else:
-                n_incorrect_predictions_to_filenames[n_incorrect_predictions] = [filename]
+            y_pred.append(probabilities.tolist()[0])
 
 
-            predicted_classes_list = predicted_classes.tolist()[0]
-            ground_truth_labels_list = labels.tolist()[0]
+    y_true_np = np.array(y_true)
+    y_pred_np = np.array(y_pred)
 
-            # getting the list of predicted and ground truth labels for the current crop
-            predicted_classes_for_crop = []
-            for x in range(len(predicted_classes_list)):
-                if predicted_classes_list[x]:
-                    predicted_classes_for_crop.append(labels_ref_for_run[x])
+    # Create a list of tuples (tag, precision, recall, n_instances)
+    # sum the columns of y_true_np to get the number of instances in the ground truth labels
+    tag_to_n_instances = [(labels_ref_for_run[i], int(np.sum(y_true_np[:, i])), i) for i in range(len(labels_ref_for_run))]
 
-            gt_labels_for_crop = []
-            for x in range(len(ground_truth_labels_list)):
-                if ground_truth_labels_list[x] == 1.0:
-                    gt_labels_for_crop.append(labels_ref_for_run[x])
+    # Sort the list based on n_instances
+    tag_to_n_instances.sort(key=lambda x: x[1], reverse=True)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 12))
+
+    tags_not_plotted = []
+
+    all_average_precisions = []
+
+    for i in range(len(tag_to_n_instances)):
+
+        tag_name, n_instances, tag_idx = tag_to_n_instances[i]
+
+        sum_gt = np.sum(y_true_np[:, tag_idx])
+        if sum_gt != n_instances:
+            # throw an error and stop
+            raise ValueError('What is happening! For tag {} sum of instances: {} and n_instances: {} are not equal'.format(tag_name, sum_gt, n_instances))
+
+        # compute precision, recall, thresholds
+        precision, recall, thresholds = precision_recall_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
+        pr_auc = auc(recall, precision)
+
+        average_precision_val = average_precision_score(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], average='weighted')
+
+        all_f1_pr = 2 * precision * recall / (precision + recall)
+        ix_pr = np.argmax(all_f1_pr)
+        best_thresh_pr = thresholds[ix_pr]
+        precision_pr_at_best_conf = precision[ix_pr]
+        recall_pr_at_best_conf = recall[ix_pr]
+
+        y_pred_class_pr = np.where(y_pred_np[:, tag_idx] > best_thresh_pr, 1, 0)
+        f1_score_pr = f1_score(y_true_np[:, tag_idx], y_pred_class_pr)
+        accuracy_score_pr = accuracy_score(y_true_np[:, tag_idx], y_pred_class_pr)
 
 
-            # updating true positives
-            for elem in predicted_classes_for_crop:
-                if elem in gt_labels_for_crop:
-                    if elem in category_to_true_positive_counts:
-                        category_to_true_positive_counts[elem].append(filename)
-                    else:
-                        category_to_true_positive_counts[elem] = [filename]
+        all_category_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
+                                                               'thresholds': thresholds.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
 
-                    if elem in category_to_prediction_stats:
-                        category_to_prediction_stats[elem]['true-positive'] += 1
-                        category_to_prediction_details[elem]['true-positive'].append({'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop})
-                    else:
-                        category_to_prediction_stats[elem] = {'true-positive': 1, 'false-positive': 0, 'false-negative': 0, 'true-negative': 0}
-                        category_to_prediction_details[elem] = {'true-positive': [{'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop}], 'false-positive': [], 'false-negative': [], 'true-negative': []}
+        if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
+            print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
 
-            # updating false positives
-            for elem in predicted_classes_for_crop:
-                if elem not in gt_labels_for_crop:
-                    if elem in category_to_false_positive_counts:
-                        category_to_false_positive_counts[elem].append(filename)
-                    else:
-                        category_to_false_positive_counts[elem] = [filename]
+        # Compute ROC curve
+        fpr, tpr, thresholds = roc_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
+        roc_auc = auc(fpr, tpr)
 
-                    if elem in category_to_prediction_stats:
-                        category_to_prediction_stats[elem]['false-positive'] += 1
-                        category_to_prediction_details[elem]['false-positive'].append({'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop})
-                    else:
-                        category_to_prediction_stats[elem] = {'true-positive': 0, 'false-positive': 1, 'false-negative': 0, 'true-negative': 0}
-                        category_to_prediction_details[elem] = {'true-positive': [], 'false-positive': [{'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop}], 'false-negative': [], 'true-negative': []}
+        J_roc = tpr - fpr
+        ix_roc = np.argmax(J_roc)
+        best_thresh_roc = thresholds[ix_roc]
+        precision_roc_at_best_conf = precision[ix_roc]
+        recall_roc_at_best_conf = recall[ix_roc]
 
-            # updating false negatives
-            for elem in gt_labels_for_crop:
-                if elem not in predicted_classes_for_crop:
-                    if elem in category_to_false_negative_counts:
-                        category_to_false_negative_counts[elem].append(filename)
-                    else:
-                        category_to_false_negative_counts[elem] = [filename]
+        y_pred_class_roc = np.where(y_pred_np[:, tag_idx] > best_thresh_roc, 1, 0)
+        f1_score_roc = f1_score(y_true_np[:, tag_idx], y_pred_class_roc)
+        accuracy_score_roc = accuracy_score(y_true_np[:, tag_idx], y_pred_class_roc)
 
-                    if elem in category_to_prediction_stats:
-                        category_to_prediction_stats[elem]['false-negative'] += 1
-                        category_to_prediction_details[elem]['false-negative'].append({'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop})
-                    else:
-                        category_to_prediction_stats[elem] = {'true-positive': 0, 'false-positive': 0, 'false-negative': 1, 'true-negative': 0}
-                        category_to_prediction_details[elem] = {'true-positive': [], 'false-positive': [], 'false-negative': [{'filename': filename, 'predicted': predicted_classes_for_crop, 'ground-truth': gt_labels_for_crop}], 'true-negative': []}
+        all_category_to_prediction_stats[tag_name].update({'fpr': fpr.tolist(), 'tpr': tpr.tolist(), 'roc_auc': roc_auc})
 
-            print("{} | Correct percent = {} | Predicted = {} vs. "
-                  "Ground Truth = {}:".format(filename, correct_predictions, predicted_classes_for_crop, gt_labels_for_crop))
 
-    # update the global variables
-    all_n_incorrect_predictions_to_filenames[conf_level] = n_incorrect_predictions_to_filenames
-    all_category_to_true_positive_counts[conf_level] = category_to_true_positive_counts
-    all_category_to_false_positive_counts[conf_level] = category_to_false_positive_counts
-    all_category_to_false_negative_counts[conf_level] = category_to_false_negative_counts
-    # all_category_to_true_negative_counts[confidence_threshold]  |  add true negative here
-    all_category_to_prediction_stats[conf_level] = category_to_prediction_stats
-    all_category_to_prediction_details[conf_level] = category_to_prediction_details
+        # don't plot if there are no instances of the tag in the ground truth labels
+        st = suppress_thresholds[params['label_type']]
+        if params['label_type'] not in suppress_thresholds:
+            st = 0
+
+        if n_instances < st:
+            tags_not_plotted.append((tag_name, n_instances))
+            continue
+
+        # note: this should be done after the suppression part
+        all_average_precisions.append(average_precision_val)
+
+        # Create a PrecisionRecallDisplay and plot it on the same axis
+        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, acc={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(accuracy_score_pr, 2), round(f1_score_pr, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
+        # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2)))
+
+        # Create a RocCurveDisplay and plot it on the same axis
+        roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot(ax=ax2, name=tag_name + '\n(n={}, AUC={})\n(conf={}, acc={}, f1={}\n(prec={}, rec={}))'.format(n_instances, round(roc_auc, 2), round(best_thresh_roc, 2), round(accuracy_score_roc, 2), round(f1_score_roc, 2), round(precision_roc_at_best_conf, 2), round(recall_roc_at_best_conf, 2)))
+
+
+    mean_average_precision = sum(all_average_precisions) / len(all_average_precisions)
+
+    # Add a legend to the plot
+    legend1 = ax1.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    # ax1.add_artist(legend1)
+
+    # # Draw a second legend to show the classes that were not plotted
+    # patches = [mpatches.Patch(color='none', label=tag_name + ' (n={})'.format(n_instances)) for tag_name, n_instances in
+    #            tags_not_plotted]
+    # legend2 = plt.legend(handles=patches, title='Classes not plotted', bbox_to_anchor=(1.05, 0), loc='lower left')
+    # ax1.add_artist(legend2)
+
+
+    # Add a legend to the ROC plot
+    ax2.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # Set titles for the plots
+    ax1.set_title('Precision-Recall Curve')
+    ax2.set_title('ROC Curve')
+
+    # Set the plot title
+    plot_title_str = 'PR and ROC Curves for label type: ' + params['label_type']
+    plot_title_str += '\nTest set size: ' + str(len(images_and_labels)) + ' images'
+    plot_title_str += '\nModel: ' + ('ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP'] else 'DINOv2 Base')
+    plot_title_str += ' | Train dataset: ' + params['dataset_type']
+
+    plot_title_str += '\nmAP: ' + str(round(mean_average_precision, 2))
+
+    # Set title for the figure and save
+    plt.suptitle(plot_title_str, fontsize=16)
+
+    model_display_name = 'ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP'] else 'DINOv2 Base'
+
+    plt.tight_layout()
+
+    pt_model_prefix = params['pretrained_model_prefix']
+    inf_set_dir_name = params['inference_set_dir_name']
+    dataset_type = params['dataset_type']
+
+    if suppress_thresholds[params['label_type']] > 0:
+        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-roc-curve-{inf_set_dir_name}.png')
+    else:
+        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-roc-curve-{inf_set_dir_name}-all.png')
+
+    plt.show()
 
 
 nc = len(labels_ref_for_run)  # number of classes.
 
-classifier = DinoVisionTransformerClassifier("base", nc)
+if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
+    classifier = CLIP_Classifier("vit_base_patch16_clip_224", nc)
+else:
+    classifier = DinoVisionTransformerClassifier("base", nc)
 
-classifier.load_state_dict(
-    torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device)))
+classifier.load_state_dict(torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device)))
 
 classifier = classifier.to(device)
 classifier.eval()
 
 # runs the inference for all confidence levels
-for conf_level in confidence_levels:
-    inference_on_validation_data(inference_model=classifier, confidence_level=conf_level)
 
-# output_file_name = dataset_dir_path + '/inference-stats' + '-' + inference_set_dir_name + '-masked.json'
-output_file_name = dataset_dir_path + '/inference-stats' + '-' + inference_set_dir_name + '.json'
+inference_on_validation_data(inference_model=classifier)
+
+output_file_name = dataset_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats' + '-' + params['inference_set_dir_name'] + '.json'
 
 # save the results to a file
 with open(output_file_name, 'w') as f:
 
     all_stats = {
-        'n_incorrect_predictions_to_filenames': all_n_incorrect_predictions_to_filenames,
+        # 'n_incorrect_predictions_to_filenames': all_n_incorrect_predictions_to_filenames,
         'category_to_prediction_stats': all_category_to_prediction_stats,
-        'category_to_prediction_details': all_category_to_prediction_details
+        # 'category_to_prediction_details': all_category_to_prediction_details
     }
 
     f.write(json.dumps(all_stats, indent=4))
 
-    draw_confusion_matrices(all_stats, c12n_category, label_type, dataset_dir_path, inference_set_dir_name)
-
-    for conf_level in all_n_incorrect_predictions_to_filenames:
-        for key in all_n_incorrect_predictions_to_filenames[conf_level]:
-            print("Number of incorrect predictions: {} | Count: {} | Confidence level: {}".format(key, len(all_n_incorrect_predictions_to_filenames[conf_level][key]), conf_level))
-
     print("-------------------")
-    # print("True Positives:")
-    #
-    # for category in category_to_true_positive_counts:
-    #     print(category + ": " + str(len(category_to_true_positive_counts[category])))
-    #
-    # print("-------------------")
-    # print("False Positives:")
-    #
-    # for category in category_to_false_positive_counts:
-    #     print(category + ": " + str(len(category_to_false_positive_counts[category])))
-    #
-    # print("-------------------")
-    # print("False Negatives:")
-    # for category in category_to_false_negative_counts:
-    #     print(category + ": " + str(len(category_to_false_negative_counts[category])))
