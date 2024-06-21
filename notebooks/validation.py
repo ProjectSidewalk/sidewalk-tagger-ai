@@ -174,7 +174,7 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'curbramp',
+    'label_type': 'crosswalk',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
     'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
@@ -201,8 +201,7 @@ if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
 # This is what DinoV2 sees
 target_size = (image_dimension, image_dimension)
 
-# temporarily skipping the cities with messy data
-# skip_cities = ['cdmx', 'spgg', 'newberg', 'columbus']
+# for temporarily skipping some cities
 skip_cities = []
 
 dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags-archive
@@ -301,7 +300,6 @@ def data_loader(dir_path, batch_size, imgsz, transform):
 labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
 
 
-all_n_incorrect_predictions_to_filenames = {}
 all_category_to_true_positive_counts = {}
 all_category_to_false_positive_counts = {}
 all_category_to_false_negative_counts = {}
@@ -351,6 +349,7 @@ def inference_on_validation_data(inference_model):
             y_pred.append(probabilities.tolist()[0])
 
 
+
     y_true_np = np.array(y_true)
     y_pred_np = np.array(y_pred)
 
@@ -361,7 +360,7 @@ def inference_on_validation_data(inference_model):
     # Sort the list based on n_instances
     tag_to_n_instances.sort(key=lambda x: x[1], reverse=True)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 12))
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 10))
 
     tags_not_plotted = []
 
@@ -429,32 +428,25 @@ def inference_on_validation_data(inference_model):
         all_average_precisions.append(average_precision_val)
 
         # Create a PrecisionRecallDisplay and plot it on the same axis
-        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, acc={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(accuracy_score_pr, 2), round(f1_score_pr, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
-        # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2)))
+        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + ' (n={})'.format(n_instances))
+        # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, acc={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(accuracy_score_pr, 2), round(f1_score_pr, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
+
 
         # Create a RocCurveDisplay and plot it on the same axis
-        roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot(ax=ax2, name=tag_name + '\n(n={}, AUC={})\n(conf={}, acc={}, f1={}\n(prec={}, rec={}))'.format(n_instances, round(roc_auc, 2), round(best_thresh_roc, 2), round(accuracy_score_roc, 2), round(f1_score_roc, 2), round(precision_roc_at_best_conf, 2), round(recall_roc_at_best_conf, 2)))
+        # roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot(ax=ax2, name=tag_name + '\n(n={}, AUC={})\n(conf={}, acc={}, f1={}\n(prec={}, rec={}))'.format(n_instances, round(roc_auc, 2), round(best_thresh_roc, 2), round(accuracy_score_roc, 2), round(f1_score_roc, 2), round(precision_roc_at_best_conf, 2), round(recall_roc_at_best_conf, 2)))
 
 
     mean_average_precision = sum(all_average_precisions) / len(all_average_precisions)
 
     # Add a legend to the plot
-    legend1 = ax1.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
-    # ax1.add_artist(legend1)
-
-    # # Draw a second legend to show the classes that were not plotted
-    # patches = [mpatches.Patch(color='none', label=tag_name + ' (n={})'.format(n_instances)) for tag_name, n_instances in
-    #            tags_not_plotted]
-    # legend2 = plt.legend(handles=patches, title='Classes not plotted', bbox_to_anchor=(1.05, 0), loc='lower left')
-    # ax1.add_artist(legend2)
-
+    legend1 = ax1.legend(title='Classes', fontsize='16')
 
     # Add a legend to the ROC plot
-    ax2.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    # Set titles for the plots
+    # ax2.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    #
+    # # Set titles for the plots
     ax1.set_title('Precision-Recall Curve')
-    ax2.set_title('ROC Curve')
+    # ax2.set_title('ROC Curve')
 
     # Set the plot title
     plot_title_str = 'PR and ROC Curves for label type: ' + params['label_type']
@@ -476,9 +468,9 @@ def inference_on_validation_data(inference_model):
     dataset_type = params['dataset_type']
 
     if suppress_thresholds[params['label_type']] > 0:
-        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-roc-curve-{inf_set_dir_name}.png')
+        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}.svg')
     else:
-        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-roc-curve-{inf_set_dir_name}-all.png')
+        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}-all.svg')
 
     plt.show()
 
