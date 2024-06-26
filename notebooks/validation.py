@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import torch
 import os
@@ -174,7 +175,7 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'crosswalk',
+    'label_type': 'curbramp',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
     'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
@@ -203,12 +204,16 @@ target_size = (image_dimension, image_dimension)
 
 # for temporarily skipping some cities
 skip_cities = []
+# skip_cities = ['oradell', 'walla_walla', 'cdmx', 'spgg', 'chicago', 'amsterdam', 'columbus', 'newberg']
 
 dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags-archive
 # dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-validated'  # example: crops-surfaceproblem-tags-archive
 dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags-archive
 
 inference_dataset_dir = Path(dataset_dir_path + "/" + params['inference_set_dir_name'])
+
+# top tp, fp, fn, tn images are saved here
+inference_results_dir = Path("../inference-results")
 
 model_name = 'models/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-cls-b-' + params['label_type'] + '-' + params['c12n_category'] + '-best.pth'
 # ------------------------------
@@ -300,19 +305,71 @@ def data_loader(dir_path, batch_size, imgsz, transform):
 labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
 
 
-all_category_to_true_positive_counts = {}
-all_category_to_false_positive_counts = {}
-all_category_to_false_negative_counts = {}
-all_category_to_true_negative_counts = {}
-
-all_category_to_prediction_stats = {}
-all_category_to_prediction_details = {}
-
+all_tag_to_prediction_stats = {}
+all_tag_to_prediction_details = {}
 
 images_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'inference')
 
 
 # -----------------------------------------------------------------
+
+def copy_top_instances_to_results_dir(tag, tp_filenames_and_conf, fp_filenames_and_conf, fn_filenames_and_conf, tn_filenames_and_conf):
+    def copy_files(filenames_and_conf, inference_dataset_dir, tag_dir_path, category):
+        conf_truncate_length = 5
+        for i, (fn, conf) in enumerate(filenames_and_conf):
+            src_file_path = os.path.join(inference_dataset_dir, fn)
+            truncated_conf = str(conf)[:conf_truncate_length]
+            dst_file_name = f'{fn.replace(".png", "")}-{truncated_conf}.png'
+            dst_file_path = os.path.join(tag_dir_path, category, dst_file_name)
+            shutil.copy2(src_file_path, dst_file_path)
+
+    # create a directory for the label type if it doesn't exist
+    os.makedirs(os.path.join(inference_results_dir, params['label_type']), exist_ok=True)
+
+    # create directory for model and dataset type if it doesn't exist
+    model_and_dataset_dir = os.path.join(inference_results_dir, params['label_type'], params['pretrained_model_prefix'] + '-' + params['dataset_type'])
+    os.makedirs(model_and_dataset_dir, exist_ok=True)
+
+    # create a directory for the tag if it doesn't exist
+    tag_dir_path = os.path.join(model_and_dataset_dir, tag)
+    os.makedirs(os.path.join(model_and_dataset_dir, tag), exist_ok=True)
+
+    # create directories for tp, fp, fn, tn if they don't exist
+    os.makedirs(os.path.join(tag_dir_path, 'tp'), exist_ok=True)
+    os.makedirs(os.path.join(tag_dir_path, 'fp'), exist_ok=True)
+    os.makedirs(os.path.join(tag_dir_path, 'fn'), exist_ok=True)
+    os.makedirs(os.path.join(tag_dir_path, 'tn'), exist_ok=True)
+
+    # clear the directories
+    for dir_name in ['tp', 'fp', 'fn', 'tn']:
+        for filename in os.listdir(os.path.join(tag_dir_path, dir_name)):
+            os.remove(os.path.join(tag_dir_path, dir_name, filename))
+
+    # copy the top 20 instances to the inference-results directory
+    copy_files(tp_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'tp')
+    copy_files(fp_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'fp')
+    copy_files(fn_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'fn')
+    copy_files(tn_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'tn')
+
+
+def check_for_mutual_exclusivity_and_total(tp_set, fp_set, fn_set, tn_set, images_and_labels):
+    if len(tp_set.intersection(fp_set)) > 0:
+        raise ValueError('TP and FP sets are not mutually exclusive')
+    if len(tp_set.intersection(fn_set)) > 0:
+        raise ValueError('TP and FN sets are not mutually exclusive')
+    if len(tp_set.intersection(tn_set)) > 0:
+        raise ValueError('TP and TN sets are not mutually exclusive')
+    if len(fp_set.intersection(fn_set)) > 0:
+        raise ValueError('FP and FN sets are not mutually exclusive')
+    if len(fp_set.intersection(tn_set)) > 0:
+        raise ValueError('FP and TN sets are not mutually exclusive')
+    if len(fn_set.intersection(tn_set)) > 0:
+        raise ValueError('FN and TN sets are not mutually exclusive')
+
+    if len(tp_set.union(fp_set).union(fn_set).union(tn_set)) != len(images_and_labels):
+        raise ValueError('The total of sets doesn\'t match the number of instances in the dataset')
+
+
 def inference_on_validation_data(inference_model):
 
     y_true = []
@@ -376,14 +433,14 @@ def inference_on_validation_data(inference_model):
             raise ValueError('What is happening! For tag {} sum of instances: {} and n_instances: {} are not equal'.format(tag_name, sum_gt, n_instances))
 
         # compute precision, recall, thresholds
-        precision, recall, thresholds = precision_recall_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
+        precision, recall, thresholds_pr = precision_recall_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
         pr_auc = auc(recall, precision)
 
         average_precision_val = average_precision_score(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], average='weighted')
 
         all_f1_pr = 2 * precision * recall / (precision + recall)
         ix_pr = np.argmax(all_f1_pr)
-        best_thresh_pr = thresholds[ix_pr]
+        best_thresh_pr = thresholds_pr[ix_pr]
         precision_pr_at_best_conf = precision[ix_pr]
         recall_pr_at_best_conf = recall[ix_pr]
 
@@ -392,27 +449,27 @@ def inference_on_validation_data(inference_model):
         accuracy_score_pr = accuracy_score(y_true_np[:, tag_idx], y_pred_class_pr)
 
 
-        all_category_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
-                                                               'thresholds': thresholds.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
+        all_tag_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
+                                                               'thresholds': thresholds_pr.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
 
         if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
             print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
 
         # Compute ROC curve
-        fpr, tpr, thresholds = roc_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
+        fpr, tpr, thresholds_roc = roc_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
         roc_auc = auc(fpr, tpr)
 
-        J_roc = tpr - fpr
-        ix_roc = np.argmax(J_roc)
-        best_thresh_roc = thresholds[ix_roc]
-        precision_roc_at_best_conf = precision[ix_roc]
-        recall_roc_at_best_conf = recall[ix_roc]
+        # J_roc = tpr - fpr
+        # ix_roc = np.argmax(J_roc)
+        # best_thresh_roc = thresholds[ix_roc]
+        # precision_roc_at_best_conf = precision[ix_roc]
+        # recall_roc_at_best_conf = recall[ix_roc]
 
-        y_pred_class_roc = np.where(y_pred_np[:, tag_idx] > best_thresh_roc, 1, 0)
-        f1_score_roc = f1_score(y_true_np[:, tag_idx], y_pred_class_roc)
-        accuracy_score_roc = accuracy_score(y_true_np[:, tag_idx], y_pred_class_roc)
+        # y_pred_class_roc = np.where(y_pred_np[:, tag_idx] > best_thresh_roc, 1, 0)
+        # f1_score_roc = f1_score(y_true_np[:, tag_idx], y_pred_class_roc)
+        # accuracy_score_roc = accuracy_score(y_true_np[:, tag_idx], y_pred_class_roc)
 
-        all_category_to_prediction_stats[tag_name].update({'fpr': fpr.tolist(), 'tpr': tpr.tolist(), 'roc_auc': roc_auc})
+        all_tag_to_prediction_stats[tag_name].update({'fpr': fpr.tolist(), 'tpr': tpr.tolist(), 'roc_auc': roc_auc})
 
 
         # don't plot if there are no instances of the tag in the ground truth labels
@@ -435,6 +492,35 @@ def inference_on_validation_data(inference_model):
         # Create a RocCurveDisplay and plot it on the same axis
         # roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot(ax=ax2, name=tag_name + '\n(n={}, AUC={})\n(conf={}, acc={}, f1={}\n(prec={}, rec={}))'.format(n_instances, round(roc_auc, 2), round(best_thresh_roc, 2), round(accuracy_score_roc, 2), round(f1_score_roc, 2), round(precision_roc_at_best_conf, 2), round(recall_roc_at_best_conf, 2)))
 
+        tp_indices_for_tag = np.where((y_true_np[:, tag_idx] == 1) & (y_pred_class_pr == 1))[0]
+        fp_indices_for_tag = np.where((y_true_np[:, tag_idx] == 0) & (y_pred_class_pr == 1))[0]
+        fn_indices_for_tag = np.where((y_true_np[:, tag_idx] == 1) & (y_pred_class_pr == 0))[0]
+        tn_indices_for_tag = np.where((y_true_np[:, tag_idx] == 0) & (y_pred_class_pr == 0))[0]
+
+        tp_filenames_and_conf = [(images_and_labels[i][2], y_pred_np[:, tag_idx][i]) for i in tp_indices_for_tag]
+        fp_filenames_and_conf = [(images_and_labels[i][2], y_pred_np[:, tag_idx][i]) for i in fp_indices_for_tag]
+        fn_filenames_and_conf = [(images_and_labels[i][2], y_pred_np[:, tag_idx][i]) for i in fn_indices_for_tag]
+        tn_filenames_and_conf = [(images_and_labels[i][2], y_pred_np[:, tag_idx][i]) for i in tn_indices_for_tag]
+
+        # check if all these sets are mutually exclusive
+        check_for_mutual_exclusivity_and_total(set(tp_indices_for_tag), set(fp_indices_for_tag), set(fn_indices_for_tag), set(tn_indices_for_tag), images_and_labels)
+
+        # sort the lists by confidence level in descending order
+        tp_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
+        fp_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
+        fn_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
+        tn_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
+
+        # get the top 20 instances for each set
+        tp_filenames_and_conf = tp_filenames_and_conf[:20]
+        fp_filenames_and_conf = fp_filenames_and_conf[:20]
+        fn_filenames_and_conf = fn_filenames_and_conf[:20]
+        tn_filenames_and_conf = tn_filenames_and_conf[:20]
+
+        # copy the crops to the results directory
+        copy_top_instances_to_results_dir(tag_name, tp_filenames_and_conf, fp_filenames_and_conf, fn_filenames_and_conf, tn_filenames_and_conf)
+
+        all_tag_to_prediction_details[tag_name] = {'tp': tp_filenames_and_conf, 'fp': fp_filenames_and_conf, 'fn': fn_filenames_and_conf}
 
     mean_average_precision = sum(all_average_precisions) / len(all_average_precisions)
 
@@ -498,7 +584,7 @@ with open(output_file_name, 'w') as f:
 
     all_stats = {
         # 'n_incorrect_predictions_to_filenames': all_n_incorrect_predictions_to_filenames,
-        'category_to_prediction_stats': all_category_to_prediction_stats,
+        'category_to_prediction_stats': all_tag_to_prediction_stats,
         # 'category_to_prediction_details': all_category_to_prediction_details
     }
 
