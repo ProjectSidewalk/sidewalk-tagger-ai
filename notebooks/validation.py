@@ -150,7 +150,10 @@ def get_labels_ref_for_run(inference_set_dir):
     global c12n_category_offset
     c12n_category_offset = validated_by_index + 1
 
-    if params['label_type'] == 'obstacle':
+    # for the CLIP model we don't have the newly added tags e.g. mailbox, seating etc.
+    # but for the DINO model, trained on the validated data, we do have them in the training data.
+    # we need to adjust the labels_ref_for_run for the CLIP model
+    if params['label_type'] == 'obstacle' and params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
         if len(labels_ref_for_run) == 20:
             labels_ref_for_run = labels_ref_for_run[:-3]
         else:
@@ -175,7 +178,7 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'curbramp',
+    'label_type': 'obstacle',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
     'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
@@ -254,6 +257,8 @@ def images_loader(dir_path, batch_size, imgsz, transform):
     labels = []
 
     fs = os.listdir(dir_path)
+    # ignore the csv file and .DS_Store (if present). this is just the list of images.
+    fs = [x for x in fs if x.endswith('.png') or x.endswith('.jpg')]
     count = 0
 
     for filename in fs:
@@ -345,7 +350,7 @@ def copy_top_instances_to_results_dir(tag, tp_filenames_and_conf, fp_filenames_a
         for filename in os.listdir(os.path.join(tag_dir_path, dir_name)):
             os.remove(os.path.join(tag_dir_path, dir_name, filename))
 
-    # copy the top 20 instances to the inference-results directory
+    # copy the top instances to the inference-results directory
     copy_files(tp_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'tp')
     copy_files(fp_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'fp')
     copy_files(fn_filenames_and_conf, inference_dataset_dir, tag_dir_path, 'fn')
@@ -406,9 +411,17 @@ def inference_on_validation_data(inference_model):
             y_pred.append(probabilities.tolist()[0])
 
 
-
+    # IMPORTANT variables
     y_true_np = np.array(y_true)
     y_pred_np = np.array(y_pred)
+
+    # Convert predicted probabilities to binary predictions
+    y_pred_binary = (y_pred_np >= 0.5).astype(int)
+
+    # Compute micro-averaged F1 score
+    f1_micro = f1_score(y_true_np, y_pred_binary, average='micro')
+    f1_macro = f1_score(y_true_np, y_pred_binary, average='macro')
+    f1_weighted = f1_score(y_true_np, y_pred_binary, average='weighted')
 
     # Create a list of tuples (tag, precision, recall, n_instances)
     # sum the columns of y_true_np to get the number of instances in the ground truth labels
@@ -417,7 +430,7 @@ def inference_on_validation_data(inference_model):
     # Sort the list based on n_instances
     tag_to_n_instances.sort(key=lambda x: x[1], reverse=True)
 
-    fig, ax1 = plt.subplots(1, 1, figsize=(10, 10))
+    fig, ax1 = plt.subplots(1, 1, figsize=(16, 10))
 
     tags_not_plotted = []
 
@@ -443,33 +456,15 @@ def inference_on_validation_data(inference_model):
         best_thresh_pr = thresholds_pr[ix_pr]
         precision_pr_at_best_conf = precision[ix_pr]
         recall_pr_at_best_conf = recall[ix_pr]
+        f1_pr_at_best_conf = all_f1_pr[ix_pr] if not np.isnan(all_f1_pr[ix_pr]) else 0
 
         y_pred_class_pr = np.where(y_pred_np[:, tag_idx] > best_thresh_pr, 1, 0)
-        f1_score_pr = f1_score(y_true_np[:, tag_idx], y_pred_class_pr)
-        accuracy_score_pr = accuracy_score(y_true_np[:, tag_idx], y_pred_class_pr)
-
 
         all_tag_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
                                                                'thresholds': thresholds_pr.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
 
         if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
             print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
-
-        # Compute ROC curve
-        fpr, tpr, thresholds_roc = roc_curve(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], pos_label=1)
-        roc_auc = auc(fpr, tpr)
-
-        # J_roc = tpr - fpr
-        # ix_roc = np.argmax(J_roc)
-        # best_thresh_roc = thresholds[ix_roc]
-        # precision_roc_at_best_conf = precision[ix_roc]
-        # recall_roc_at_best_conf = recall[ix_roc]
-
-        # y_pred_class_roc = np.where(y_pred_np[:, tag_idx] > best_thresh_roc, 1, 0)
-        # f1_score_roc = f1_score(y_true_np[:, tag_idx], y_pred_class_roc)
-        # accuracy_score_roc = accuracy_score(y_true_np[:, tag_idx], y_pred_class_roc)
-
-        all_tag_to_prediction_stats[tag_name].update({'fpr': fpr.tolist(), 'tpr': tpr.tolist(), 'roc_auc': roc_auc})
 
 
         # don't plot if there are no instances of the tag in the ground truth labels
@@ -485,8 +480,8 @@ def inference_on_validation_data(inference_model):
         all_average_precisions.append(average_precision_val)
 
         # Create a PrecisionRecallDisplay and plot it on the same axis
-        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + ' (n={})'.format(n_instances))
-        # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, acc={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(accuracy_score_pr, 2), round(f1_score_pr, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
+        # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + ' (n={})'.format(n_instances))
+        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(f1_pr_at_best_conf, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
 
 
         # Create a RocCurveDisplay and plot it on the same axis
@@ -511,11 +506,12 @@ def inference_on_validation_data(inference_model):
         fn_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
         tn_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
 
-        # get the top 20 instances for each set
-        tp_filenames_and_conf = tp_filenames_and_conf[:20]
-        fp_filenames_and_conf = fp_filenames_and_conf[:20]
-        fn_filenames_and_conf = fn_filenames_and_conf[:20]
-        tn_filenames_and_conf = tn_filenames_and_conf[:20]
+        # get the top N instances for each set
+        N_top_instances = 50
+        tp_filenames_and_conf = tp_filenames_and_conf[:N_top_instances]
+        fp_filenames_and_conf = fp_filenames_and_conf[:N_top_instances]
+        fn_filenames_and_conf = fn_filenames_and_conf[:N_top_instances]
+        tn_filenames_and_conf = tn_filenames_and_conf[:N_top_instances]
 
         # copy the crops to the results directory
         copy_top_instances_to_results_dir(tag_name, tp_filenames_and_conf, fp_filenames_and_conf, fn_filenames_and_conf, tn_filenames_and_conf)
@@ -525,7 +521,7 @@ def inference_on_validation_data(inference_model):
     mean_average_precision = sum(all_average_precisions) / len(all_average_precisions)
 
     # Add a legend to the plot
-    legend1 = ax1.legend(title='Classes', fontsize='16')
+    legend1 = ax1.legend(title='Classes', fontsize='14', bbox_to_anchor=(1.05, 1), loc='upper left')
 
     # Add a legend to the ROC plot
     # ax2.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -540,7 +536,10 @@ def inference_on_validation_data(inference_model):
     plot_title_str += '\nModel: ' + ('ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP'] else 'DINOv2 Base')
     plot_title_str += ' | Train dataset: ' + params['dataset_type']
 
-    plot_title_str += '\nmAP: ' + str(round(mean_average_precision, 2))
+    plot_title_str += ('\nmAP: ' + str(round(mean_average_precision, 2)) +
+                       ' | ' + 'Micro F1: ' + str(round(f1_micro, 2)) +
+                       ' | ' + 'Macro F1: ' + str(round(f1_macro, 2)) +
+                       ' | ' + 'Weighted F1: ' + str(round(f1_weighted, 2)))
 
     # Set title for the figure and save
     plt.suptitle(plot_title_str, fontsize=16)
