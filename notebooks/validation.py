@@ -8,13 +8,12 @@ import pandas as pd
 from PIL import Image
 from torchvision import datasets, transforms
 import numpy as np
-from torch import nn, optim
+from torch import nn
 from copy import deepcopy
 import sys
 from sklearn.metrics import precision_recall_curve, auc, PrecisionRecallDisplay
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, RocCurveDisplay
-from sklearn.metrics import average_precision_score, accuracy_score, hamming_loss, f1_score
+from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score
 import timm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -178,13 +177,14 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'obstacle',
+    'label_type': 'surfaceproblem',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
     'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
     # these don't really change for now
     'c12n_category': C12N_CATEGORIES['TAGS'],
     'inference_set_dir_name': 'test',
+    'min_threshold': 0.3
 }
 
 # ------------------------------
@@ -375,6 +375,34 @@ def check_for_mutual_exclusivity_and_total(tp_set, fp_set, fn_set, tn_set, image
         raise ValueError('The total of sets doesn\'t match the number of instances in the dataset')
 
 
+# computes micro, macro, and weighted f1 scores at the fixed confidence threshold in params
+def compute_overall_f1(yt, yp):
+    # exclude the columns where the true positives are less than 10
+    # this is to suppress the tags that are not very common
+
+    y_true_np_selected = yt[:, np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]]
+    y_pred_np_selected = yp[:, np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]]
+
+    # Convert predicted probabilities to binary predictions
+    y_pred_binary_selected = (y_pred_np_selected >= params['min_threshold']).astype(int)
+
+    # Compute micro-averaged F1 score
+    f1_micro_selected = f1_score(y_true_np_selected, y_pred_binary_selected, average='micro')
+    f1_macro_selected = f1_score(y_true_np_selected, y_pred_binary_selected, average='macro')
+    f1_weighted_selected = f1_score(y_true_np_selected, y_pred_binary_selected, average='weighted')
+
+    return f1_micro_selected, f1_macro_selected, f1_weighted_selected
+
+
+# computes precision, recall, and f1 at the given threshold
+def get_precision_recall_f1_at_conf(y_true, y_pred, conf):
+    y_pred_binary = np.where(y_pred >= conf, 1, 0)
+    precision = precision_score(y_true, y_pred_binary)
+    recall = recall_score(y_true, y_pred_binary)
+    f1 = f1_score(y_true, y_pred_binary)
+    return precision, recall, f1
+
+
 def inference_on_validation_data(inference_model):
 
     y_true = []
@@ -415,13 +443,8 @@ def inference_on_validation_data(inference_model):
     y_true_np = np.array(y_true)
     y_pred_np = np.array(y_pred)
 
-    # Convert predicted probabilities to binary predictions
-    y_pred_binary = (y_pred_np >= 0.5).astype(int)
-
-    # Compute micro-averaged F1 score
-    f1_micro = f1_score(y_true_np, y_pred_binary, average='micro')
-    f1_macro = f1_score(y_true_np, y_pred_binary, average='macro')
-    f1_weighted = f1_score(y_true_np, y_pred_binary, average='weighted')
+    # Compute the overall F1 score. This function internally takes into account the suppress thresholds and leaves out the tags that have less than the threshold count.
+    f1_micro_selected, f1_macro_selected, f1_weighted_selected = compute_overall_f1(y_true_np, y_pred_np)
 
     # Create a list of tuples (tag, precision, recall, n_instances)
     # sum the columns of y_true_np to get the number of instances in the ground truth labels
@@ -430,11 +453,12 @@ def inference_on_validation_data(inference_model):
     # Sort the list based on n_instances
     tag_to_n_instances.sort(key=lambda x: x[1], reverse=True)
 
-    fig, ax1 = plt.subplots(1, 1, figsize=(16, 10))
+    fig, ax1 = plt.subplots(1, 1, figsize=(16, 12))
 
     tags_not_plotted = []
 
     all_average_precisions = []
+    all_f1_scores_test = []
 
     for i in range(len(tag_to_n_instances)):
 
@@ -454,11 +478,13 @@ def inference_on_validation_data(inference_model):
         all_f1_pr = 2 * precision * recall / (precision + recall)
         ix_pr = np.argmax(all_f1_pr)
         best_thresh_pr = thresholds_pr[ix_pr]
-        precision_pr_at_best_conf = precision[ix_pr]
-        recall_pr_at_best_conf = recall[ix_pr]
-        f1_pr_at_best_conf = all_f1_pr[ix_pr] if not np.isnan(all_f1_pr[ix_pr]) else 0
 
-        y_pred_class_pr = np.where(y_pred_np[:, tag_idx] > best_thresh_pr, 1, 0)
+        if best_thresh_pr < params['min_threshold']:
+            best_thresh_pr = params['min_threshold']
+
+        precision_at_conf, recall_at_conf, f1_at_conf = get_precision_recall_f1_at_conf(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], best_thresh_pr)
+
+        y_pred_class_pr = np.where(y_pred_np[:, tag_idx] >= best_thresh_pr, 1, 0)
 
         all_tag_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
                                                                'thresholds': thresholds_pr.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
@@ -479,9 +505,13 @@ def inference_on_validation_data(inference_model):
         # note: this should be done after the suppression part
         all_average_precisions.append(average_precision_val)
 
+        # this is just for testing.
+        y_pred_binary_05 = np.where(y_pred_np[:, tag_idx] > 0.5, 1, 0)
+        all_f1_scores_test.append(f1_score(y_true_np[:, tag_idx], y_pred_binary_05))
+
         # Create a PrecisionRecallDisplay and plot it on the same axis
         # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + ' (n={})'.format(n_instances))
-        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(f1_pr_at_best_conf, 2), round(precision_pr_at_best_conf, 2), round(recall_pr_at_best_conf, 2)))
+        pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(f1_at_conf, 2), round(precision_at_conf, 2), round(recall_at_conf, 2)))
 
 
         # Create a RocCurveDisplay and plot it on the same axis
@@ -519,9 +549,10 @@ def inference_on_validation_data(inference_model):
         all_tag_to_prediction_details[tag_name] = {'tp': tp_filenames_and_conf, 'fp': fp_filenames_and_conf, 'fn': fn_filenames_and_conf}
 
     mean_average_precision = sum(all_average_precisions) / len(all_average_precisions)
+    manual_average_f1 = sum(all_f1_scores_test) / len(all_f1_scores_test)
 
     # Add a legend to the plot
-    legend1 = ax1.legend(title='Classes', fontsize='14', bbox_to_anchor=(1.05, 1), loc='upper left')
+    legend1 = ax1.legend(title='Classes', fontsize='12', bbox_to_anchor=(1.05, 1), loc='upper left')
 
     # Add a legend to the ROC plot
     # ax2.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -537,9 +568,10 @@ def inference_on_validation_data(inference_model):
     plot_title_str += ' | Train dataset: ' + params['dataset_type']
 
     plot_title_str += ('\nmAP: ' + str(round(mean_average_precision, 2)) +
-                       ' | ' + 'Micro F1: ' + str(round(f1_micro, 2)) +
-                       ' | ' + 'Macro F1: ' + str(round(f1_macro, 2)) +
-                       ' | ' + 'Weighted F1: ' + str(round(f1_weighted, 2)))
+                       ' | ' + 'Micro F1: ' + str(round(f1_micro_selected, 2)) +
+                       ' | ' + 'Macro F1: ' + str(round(f1_macro_selected, 2)) +
+                       ' | ' + 'Weighted F1: ' + str(round(f1_weighted_selected, 2)) +
+                       ' | ' + 'Manual avg.: ' + str(round(manual_average_f1, 2)))
 
     # Set title for the figure and save
     plt.suptitle(plot_title_str, fontsize=16)
