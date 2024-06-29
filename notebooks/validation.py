@@ -1,4 +1,5 @@
 import json
+import math
 import shutil
 
 import torch
@@ -149,10 +150,10 @@ def get_labels_ref_for_run(inference_set_dir):
     global c12n_category_offset
     c12n_category_offset = validated_by_index + 1
 
-    # for the CLIP model we don't have the newly added tags e.g. mailbox, seating etc.
+    # for the unvalidated data model we don't have the newly added tags e.g. mailbox, seating etc.
     # but for the DINO model, trained on the validated data, we do have them in the training data.
     # we need to adjust the labels_ref_for_run for the CLIP model
-    if params['label_type'] == 'obstacle' and params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
+    if params['label_type'] == 'obstacle' and params['dataset_type'] == 'unvalidated':
         if len(labels_ref_for_run) == 20:
             labels_ref_for_run = labels_ref_for_run[:-3]
         else:
@@ -179,7 +180,7 @@ MODEL_PREFIXES = {
 params = {
     'label_type': 'obstacle',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
-    'dataset_type': 'validated',  # 'unvalidated' or 'validated'
+    'dataset_type': 'unvalidated',  # 'unvalidated' or 'validated'
 
     # these don't really change for now
     'c12n_category': C12N_CATEGORIES['TAGS'],
@@ -319,11 +320,18 @@ images_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'infe
 # -----------------------------------------------------------------
 
 def copy_top_instances_to_results_dir(tag, tp_filenames_and_conf, fp_filenames_and_conf, fn_filenames_and_conf, tn_filenames_and_conf):
+    def truncate_float(f, n):
+        return math.trunc(f * 10 ** n) / 10 ** n
+
     def copy_files(filenames_and_conf, inference_dataset_dir, tag_dir_path, category):
-        conf_truncate_length = 5
+        conf_truncate_length = 4
         for i, (fn, conf) in enumerate(filenames_and_conf):
+
+            if (conf > 1.0) or (conf < 0.0):
+                raise ValueError('Confidence value is not in the range [0, 1]')
+
             src_file_path = os.path.join(inference_dataset_dir, fn)
-            truncated_conf = str(conf)[:conf_truncate_length]
+            truncated_conf = truncate_float(conf, conf_truncate_length)
             dst_file_name = f'{fn.replace(".png", "")}-{truncated_conf}.png'
             dst_file_path = os.path.join(tag_dir_path, category, dst_file_name)
             shutil.copy2(src_file_path, dst_file_path)
@@ -377,7 +385,7 @@ def check_for_mutual_exclusivity_and_total(tp_set, fp_set, fn_set, tn_set, image
 
 # computes micro, macro, and weighted f1 scores at the fixed confidence threshold in params
 def compute_overall_f1(yt, yp):
-    # exclude the columns where the true positives are less than 10
+    # exclude the columns where the ground truth are less than the minimum frequency threshold
     # this is to suppress the tags that are not very common
 
     y_true_np_selected = yt[:, np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]]
@@ -417,7 +425,6 @@ def inference_on_validation_data(inference_model):
         print('Processing image. Index: {}, Filename: {}'.format(idx, filename))
 
         input_tensor = img_tensor.to(device)
-        labels_tensor = labels.to(device)
 
         y_true.append(labels.tolist()[0])
 
@@ -442,6 +449,18 @@ def inference_on_validation_data(inference_model):
     # IMPORTANT variables
     y_true_np = np.array(y_true)
     y_pred_np = np.array(y_pred)
+
+    # ------------------------------ #
+
+    # IMPORTANT NOTE: For obstacle, we added 3 new tags in the validated data. These tags are not present in the unvalidated data.
+    # The 3 extra tags (mailbox, seating, and uneven-slanted) are in the test set but not in the model and the training set.
+    # So we need to remove these tags from the validated ground truth test set.
+    # Again, this is only when the model is trained on unvalidated data and tag type is obstacle.
+    # A similar adjustment is done in the 'get_labels_ref_for_run' function.
+    if params['label_type'] == 'obstacle' and params['dataset_type'] == 'unvalidated':
+        y_true_np = y_true_np[:, :-3]
+
+    # ------------------------------ #
 
     # Compute the overall F1 score. This function internally takes into account the suppress thresholds and leaves out the tags that have less than the threshold count.
     f1_micro_selected, f1_macro_selected, f1_weighted_selected = compute_overall_f1(y_true_np, y_pred_np)
@@ -492,7 +511,6 @@ def inference_on_validation_data(inference_model):
 
         if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
             print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
-
 
         # don't plot if there are no instances of the tag in the ground truth labels
         st = suppress_thresholds[params['label_type']]
@@ -562,22 +580,24 @@ def inference_on_validation_data(inference_model):
     ax1.set_title('Precision-Recall Curve')
     # ax2.set_title('ROC Curve')
 
+    model_display_name = 'ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES[
+        'CLIP'] else 'DINOv2 Base'
+
     # Set the plot title
     plot_title_str = 'PR and ROC Curves for label type: ' + params['label_type']
     plot_title_str += '\nTest set size: ' + str(len(images_and_labels)) + ' images'
-    plot_title_str += '\nModel: ' + ('ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP'] else 'DINOv2 Base')
+    plot_title_str += '\nModel: ' + model_display_name
     plot_title_str += ' | Train dataset: ' + params['dataset_type']
 
     plot_title_str += ('\nmAP: ' + str(round(mean_average_precision, 2)) +
                        ' | ' + 'Micro F1: ' + str(round(f1_micro_selected, 2)) +
                        ' | ' + 'Macro F1: ' + str(round(f1_macro_selected, 2)) +
                        ' | ' + 'Weighted F1: ' + str(round(f1_weighted_selected, 2)) +
-                       ' | ' + 'Manual avg.: ' + str(round(manual_average_f1, 2)))
+                       ' | ' + 'Manual avg.: ' + str(round(manual_average_f1, 2)) +
+                       ' | ' + 'Threshold: ' + str(params['min_threshold']))
 
     # Set title for the figure and save
     plt.suptitle(plot_title_str, fontsize=16)
-
-    model_display_name = 'ViT CLIP Base' if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP'] else 'DINOv2 Base'
 
     plt.tight_layout()
 
