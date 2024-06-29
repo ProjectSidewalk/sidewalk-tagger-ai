@@ -284,7 +284,7 @@ def images_loader(dir_path, batch_size, imgsz, transform):
                 labels_for_image = label_data.query('filename == @filename')
 
                 if len(labels_for_image) == 0:
-                    continue
+                    raise ValueError('No label found for image: ' + filename)
 
                 # we don't expect to see any 'disagreed' or 'unsure' labels in the test set
                 if labels_for_image['label_type_validation'].values[0] != 'agree':
