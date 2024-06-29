@@ -538,7 +538,7 @@ def inference_on_validation_data(inference_model):
         tn_filenames_and_conf.sort(key=lambda x: x[1], reverse=True)
 
         # get the top N instances for each set
-        N_top_instances = 50
+        N_top_instances = 30
         tp_filenames_and_conf = tp_filenames_and_conf[:N_top_instances]
         fp_filenames_and_conf = fp_filenames_and_conf[:N_top_instances]
         fn_filenames_and_conf = fn_filenames_and_conf[:N_top_instances]
