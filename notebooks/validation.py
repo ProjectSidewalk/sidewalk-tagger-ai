@@ -177,7 +177,7 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'surfaceproblem',
+    'label_type': 'obstacle',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
     'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
@@ -475,7 +475,8 @@ def inference_on_validation_data(inference_model):
 
         average_precision_val = average_precision_score(y_true_np[:, tag_idx], y_pred_np[:, tag_idx], average='weighted')
 
-        all_f1_pr = 2 * precision * recall / (precision + recall)
+        denominator = (precision + recall)
+        all_f1_pr = np.where(denominator != 0, 2 * precision * recall / denominator, 0)  # to avoid zero division error
         ix_pr = np.argmax(all_f1_pr)
         best_thresh_pr = thresholds_pr[ix_pr]
 
@@ -506,7 +507,7 @@ def inference_on_validation_data(inference_model):
         all_average_precisions.append(average_precision_val)
 
         # this is just for testing.
-        y_pred_binary_05 = np.where(y_pred_np[:, tag_idx] > 0.5, 1, 0)
+        y_pred_binary_05 = np.where(y_pred_np[:, tag_idx] >= params['min_threshold'], 1, 0)
         all_f1_scores_test.append(f1_score(y_true_np[:, tag_idx], y_pred_binary_05))
 
         # Create a PrecisionRecallDisplay and plot it on the same axis
