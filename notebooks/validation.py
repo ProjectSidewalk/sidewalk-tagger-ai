@@ -286,9 +286,9 @@ def images_loader(dir_path, batch_size, imgsz, transform):
                 if len(labels_for_image) == 0:
                     continue
 
+                # we don't expect to see any 'disagreed' or 'unsure' labels in the test set
                 if labels_for_image['label_type_validation'].values[0] != 'agree':
-                    print('Disagreed or unsure label: ' + filename)
-                    continue
+                    raise ValueError('Disagreed or unsure label: ' + filename)
 
                 images.append(torch.tensor(np.array([img], dtype=np.float32), requires_grad=True))
                 labels.append(
