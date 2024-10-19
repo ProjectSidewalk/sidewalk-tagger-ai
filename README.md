@@ -34,7 +34,7 @@ The DinoV2 pre-trained weights should be downloaded separately.
 
 3. Run all cells in the notebook to train the model.
 
-4. The best model will be saved based on validation accuracy.
+4. The best model will be saved based on training accuracy and loss.
 
 ## Customization
 
