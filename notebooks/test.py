@@ -620,7 +620,12 @@ if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
 else:
     classifier = DinoVisionTransformerClassifier("base", nc)
 
-classifier.load_state_dict(torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device)))
+model_load = torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device))
+
+if 'model_state_dict' in model_load:
+    classifier.load_state_dict(model_load['model_state_dict'])
+else:
+    classifier.load_state_dict(model_load)
 
 classifier = classifier.to(device)
 classifier.eval()
