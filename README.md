@@ -1,10 +1,31 @@
-# Dino Trainer
+# Sidewalk Tagger AI
 
-This Jupyter notebook trains a classification model using DinoV2 to predict tags or severity for Project Sidewalk label types.
+> **Alex (Xinlei) Liu\*, Kevin Wu\*, Minchu Kulkarni, Michael Sugstad, Peyton Rapo, Jeremy Freiburger, Maryam Hosseini, Chu Li, Jon E. Froehlich**
+> 
+> We examine the feasibility of using deep learning to infer 33 classes of sidewalk accessibility conditions in pre-cropped streetscape images, including bumpy, brick/cobblestone, cracks, height diference (uplifts), narrow, uneven/slanted, pole, and sign. We present two experiments: frst, a comparison between two state-of-the-art computer vision models, Meta’s DINOv2 and OpenAI’s CLIP-ViT, on a cleaned dataset of ∼24k images; second, an examination of a larger but noisier crowdsourced dataset (∼87k images) on the best performing model from Experiment 1. Though preliminary, Experiment 1 shows that certain sidewalk conditions can be identifed with high precision and recall, such as missing tactile warnings on curb ramps and grass grown on sidewalks, while Experiment 2 demonstrates that larger but noisier training data can have a detrimental efect on performance. We contribute an open dataset and classifcation benchmarks to advance this important area.
 
-## Overview
+![Teaser Image](docs/figure-teaser.png)
 
-The notebook uses a pre-trained DinoV2 vision transformer model and fine-tunes it on Project Sidewalk image data to classify accessibility issues in street-level imagery. Key features include:
+## Datasets
+
+This repository contains:
+- Code to train and evaluate multi-label classification models with DINOv2 model and OpenAI ViT-CLIP models as base models for predicting Project Sidewalk's tags to assess sidewalk accessibility conditions.
+- Links to two datasets: 
+  - [Cleaned Dataset (Dataset 1)](to be added)
+  - [Uncleaned Dataset (Dataset 2)](to be added)
+
+For each dataset, we provide:
+- A directory containing the images and the corresponding tags information in a CSV file organized by label type.
+- The CSV file contains the image names, normalized X and Y coordinates of the label points, and their corresponding multi-hot encoded labels information.
+
+
+## Code
+
+There are two main notebooks to train DINOv2 and CLIP-ViT models:
+- `notebooks/dino-trainer.ipynb`: Train DINOv2 model.
+- `notebooks/clip-vit-trainer.ipynb`: Train CLIP-ViT model.
+
+Both notebooks use a pretrained model and fine-tune it on the Project Sidewalk dataset.
 
 - Customizable training for different label types (e.g. curb ramps, surface problems)
 - Support for multi-label classification (tags) or regression (severity)
@@ -19,7 +40,6 @@ The notebook uses a pre-trained DinoV2 vision transformer model and fine-tunes i
 - matplotlib
 - pandas
 - scikit-learn
-- comet_ml (optional, for experiment tracking)
 
 The DinoV2 pre-trained weights should be downloaded separately.
 
@@ -36,34 +56,7 @@ The DinoV2 pre-trained weights should be downloaded separately.
 
 4. The best model will be saved based on training accuracy and loss.
 
-## Customization
 
-The notebook can be adapted for different datasets by modifying:
+<!-- ## Acknowledgements -->
 
-- The data loading and preprocessing steps
-- The model architecture (e.g. classification head)
-- Training hyperparameters
-
-## License
-
-MIT License
-
-Copyright (c) [year] [fullname]
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+<!-- This repository is partially based on [Diffusers](https://github.com/huggingface/diffusers) and [Collage Diffusion](https://github.com/VSAnimator/collage-diffusion). -->
