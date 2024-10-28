@@ -1,5 +1,7 @@
 # Towards Fine-Grained Sidewalk Accessibility Assessment with Deep Learning: Initial Benchmarks and an Open Dataset
 
+This repository introduces our image-based dataset with 33 classess of sidewalk accessibility conditions as well as exerpimental benchmarks to set a comparative baseline for future work.
+
 > **Alex (Xinlei) Liu\*, Kevin Wu\*, Minchu Kulkarni, Michael Sugstad, Peyton Rapo, Jeremy Freiburger, Maryam Hosseini, Chu Li, Jon E. Froehlich**
 > 
 > We examine the feasibility of using deep learning to infer 33 classes of sidewalk accessibility conditions in pre-cropped streetscape images, including bumpy, brick/cobblestone, cracks, height diference (uplifts), narrow, uneven/slanted, pole, and sign. We present two experiments: frst, a comparison between two state-of-the-art computer vision models, Meta’s DINOv2 and OpenAI’s CLIP-ViT, on a cleaned dataset of ∼24k images; second, an examination of a larger but noisier crowdsourced dataset (∼87k images) on the best performing model from Experiment 1. Though preliminary, Experiment 1 shows that certain sidewalk conditions can be identifed with high precision and recall, such as missing tactile warnings on curb ramps and grass grown on sidewalks, while Experiment 2 demonstrates that larger but noisier training data can have a detrimental efect on performance. We contribute an open dataset and classifcation benchmarks to advance this important area.
