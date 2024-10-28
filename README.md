@@ -8,6 +8,24 @@
 
 <a href="https://dl.acm.org/doi/10.1145/3663548.3688531"><img src="https://img.shields.io/badge/ACM_DL-PDF-blue" height=20.5></a>
 
+Please cite as:
+> @inproceedings{10.1145/3663548.3688531, <br/>
+> author = {Liu, Xinlei and Wu, Kevin and Kulkarni, Minchu and Saugstad, Michael and Rapo, Peyton Anton and Freiburger, Jeremy and Hosseini, Maryam and Li, Chu and Froehlich, Jon E.},<br/>
+> title = {Towards Fine-Grained Sidewalk Accessibility Assessment with Deep Learning: Initial Benchmarks and an Open Dataset},<br/>
+> year = {2024}, <br/>
+> isbn = {9798400706776}, <br/>
+> publisher = {Association for Computing Machinery}, <br/>
+> address = {New York, NY, USA}, <br/>
+> url = {https://doi.org/10.1145/3663548.3688531}, <br/>
+> doi = {10.1145/3663548.3688531}, <br/>
+> booktitle = {Proceedings of the 26th International ACM SIGACCESS Conference on Computers and Accessibility}, <br/>
+> articleno = {103}, <br/>
+> numpages = {12}, <br/>
+> keywords = {DINOv2, Sidewalk accessibility, ViT-CLIP, computer vision, human mobility, obstacle detection}, <br/>
+> location = {St. John's, NL, Canada}, <br/>
+> series = {ASSETS '24} <br/>
+> } <br/>
+
 ## Example images from Project Sidewalk Dataset
 ![Teaser Image](docs/figure-teaser.png)
 
