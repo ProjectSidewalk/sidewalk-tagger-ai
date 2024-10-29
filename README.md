@@ -1,6 +1,6 @@
 # Towards Fine-Grained Sidewalk Accessibility Assessment with Deep Learning: Initial Benchmarks and an Open Dataset
 
-This repository introduces our image-based dataset with 33 classess of sidewalk accessibility conditions as well as exerpimental benchmarks to set a comparative baseline for future work.
+This repository introduces our image-based dataset with 33 classess of sidewalk accessibility conditions as well as experimental benchmarks to set a comparative baseline for future work.
 
 > **Alex (Xinlei) Liu\*, Kevin Wu\*, Minchu Kulkarni, Michael Sugstad, Peyton Rapo, Jeremy Freiburger, Maryam Hosseini, Chu Li, Jon E. Froehlich**
 > 
