@@ -10,23 +10,6 @@ This repository introduces our image-based dataset with 33 classess of sidewalk 
 
 <a href="https://dl.acm.org/doi/10.1145/3663548.3688531"><img src="https://img.shields.io/badge/ACM_DL-PDF-blue" height=20.5></a>
 
-Please cite as:
-> @inproceedings{10.1145/3663548.3688531, <br/>
-> author = {Liu, Xinlei and Wu, Kevin and Kulkarni, Minchu and Saugstad, Michael and Rapo, Peyton Anton and Freiburger, Jeremy and Hosseini, Maryam and Li, Chu and Froehlich, Jon E.},<br/>
-> title = {Towards Fine-Grained Sidewalk Accessibility Assessment with Deep Learning: Initial Benchmarks and an Open Dataset},<br/>
-> year = {2024}, <br/>
-> isbn = {9798400706776}, <br/>
-> publisher = {Association for Computing Machinery}, <br/>
-> address = {New York, NY, USA}, <br/>
-> url = {https://doi.org/10.1145/3663548.3688531}, <br/>
-> doi = {10.1145/3663548.3688531}, <br/>
-> booktitle = {Proceedings of the 26th International ACM SIGACCESS Conference on Computers and Accessibility}, <br/>
-> articleno = {103}, <br/>
-> numpages = {12}, <br/>
-> keywords = {DINOv2, Sidewalk accessibility, ViT-CLIP, computer vision, human mobility, obstacle detection}, <br/>
-> location = {St. John's, NL, Canada}, <br/>
-> series = {ASSETS '24} <br/>
-> } <br/>
 
 ## Example images from Project Sidewalk Dataset
 ![Teaser Image](docs/figure-teaser.png)
@@ -89,3 +72,21 @@ Both `dino-trainer.ipynb` and `clip-vit-trainer.ipynb` require the same dataset 
 - The model should be available in the `models` directory. The naming format for the model file is `[validated|unvalidated]-[dino|clip]-cls-b-<label_type>-tags-best.pth` e.g. `validated-dino-cls-b-surfaceproblem-tags-best.pth`.
 - The test dataset should be available in the `../datasets/crops-<label_type>-tags/test/` directory. The directory should contain the images and the correspoding CSV file with ground truth labels. The CSV file should be named as `test.csv`.
 - The script will save the inference results in the `../datasets/crops-<label_type>-tags/` directory.
+
+Please cite as:
+> @inproceedings{10.1145/3663548.3688531, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;author = {Liu, Xinlei and Wu, Kevin and Kulkarni, Minchu and Saugstad, Michael and Rapo, Peyton Anton and Freiburger, Jeremy and Hosseini, Maryam and Li, Chu and Froehlich, Jon E.},<br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;title = {Towards Fine-Grained Sidewalk Accessibility Assessment with Deep Learning: Initial Benchmarks and an Open Dataset},<br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;year = {2024}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;isbn = {9798400706776}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;publisher = {Association for Computing Machinery}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;address = {New York, NY, USA}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;url = {https://doi.org/10.1145/3663548.3688531}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;doi = {10.1145/3663548.3688531}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;booktitle = {Proceedings of the 26th International ACM SIGACCESS Conference on Computers and Accessibility}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;articleno = {103}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;numpages = {12}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;keywords = {DINOv2, Sidewalk accessibility, ViT-CLIP, computer vision, human mobility, obstacle detection}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;location = {St. John's, NL, Canada}, <br/>
+>   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;series = {ASSETS '24} <br/>
+> }
