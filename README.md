@@ -23,8 +23,8 @@ This repository introduces our image-based dataset with 33 classess of sidewalk 
 This repository contains:
 - Code to train and evaluate multi-label classification models with DINOv2 model and OpenAI ViT-CLIP models as base models for predicting Project Sidewalk's tags to assess sidewalk accessibility conditions.
 - Links to two datasets: 
-  - [Cleaned Dataset (Dataset 1)](to be added)
-  - [Uncleaned Dataset (Dataset 2)](to be added)
+  - [Cleaned Dataset (Dataset 1)]([url](https://huggingface.co/datasets/projectsidewalk/sidewalk-tagger-ai-validated))
+  - [Uncleaned Dataset (Dataset 2)]([url](https://huggingface.co/datasets/projectsidewalk/sidewalk-tagger-ai-unvalidated))
 
 For each dataset, we provide:
 - A directory containing the images and the corresponding tags information in a CSV file organized by label type.
