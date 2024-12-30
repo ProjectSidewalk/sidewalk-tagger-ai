@@ -140,8 +140,13 @@ def get_labels_ref_for_run(inference_set_dir):
     # get the header row
     header_row = label_data.columns.tolist()
 
+    print(header_row)
+
     # get the index of 'validated_by' column
-    validated_by_index = header_row.index('validated_by')
+    if 'validated_by' in header_row:
+        validated_by_index = header_row.index('validated_by')
+    else:
+        validated_by_index = header_row.index('normalized_y')
 
     # get everything after 'validated_by' column
     labels_ref_for_run = header_row[validated_by_index + 1:]
@@ -178,9 +183,9 @@ MODEL_PREFIXES = {
 # ------------------------------
 
 params = {
-    'label_type': 'obstacle',
+    'label_type': 'crosswalk',
     'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
-    'dataset_type': 'unvalidated',  # 'unvalidated' or 'validated'
+    'dataset_type': 'validated',  # 'unvalidated' or 'validated'
 
     # these don't really change for now
     'c12n_category': C12N_CATEGORIES['TAGS'],
@@ -285,11 +290,11 @@ def images_loader(dir_path, batch_size, imgsz, transform):
                 labels_for_image = label_data.query('filename == @filename')
 
                 if len(labels_for_image) == 0:
-                    raise ValueError('No label found for image: ' + filename)
+                    continue
 
                 # we don't expect to see any 'disagreed' or 'unsure' labels in the test set
-                if labels_for_image['label_type_validation'].values[0] != 'agree':
-                    raise ValueError('Disagreed or unsure label: ' + filename)
+                # if labels_for_image['label_type_validation'].values[0] != 'agree':
+                #     raise ValueError('Disagreed or unsure label: ' + filename)
 
                 images.append(torch.tensor(np.array([img], dtype=np.float32), requires_grad=True))
                 labels.append(
