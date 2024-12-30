@@ -73,6 +73,10 @@ Both `dino-trainer.ipynb` and `clip-vit-trainer.ipynb` require the same dataset 
 - The test dataset should be available in the `../datasets/crops-<label_type>-tags/test/` directory. The directory should contain the images and the correspoding CSV file with ground truth labels. The CSV file should be named as `test.csv`.
 - The script will save the inference results in the `../datasets/crops-<label_type>-tags/` directory.
 
+### Reproduce Results / Evaluation Guide
+
+- See https://github.com/ProjectSidewalk/sidewalk-tagger-ai/blob/main/REPRODUCE_RESULTS.md
+
 Please cite as:
 > @inproceedings{10.1145/3663548.3688531, <br/>
 >   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;author = {Liu, Xinlei and Wu, Kevin and Kulkarni, Minchu and Saugstad, Michael and Rapo, Peyton Anton and Freiburger, Jeremy and Hosseini, Maryam and Li, Chu and Froehlich, Jon E.},<br/>
