@@ -5,6 +5,7 @@ This is a guide for how to reproduce the results published in the paper.
 wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_reg4_pretrain.pth
 mkdir notebooks/models
 cd notebooks/models
+alias wget='wget --content-disposition'  # Makes sure that file names don't include "?download=true" at the end.
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-crosswalk-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-curbramp-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-obstacle-tags-best.pth?download=true
@@ -20,13 +21,14 @@ wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/ma
 cd ../..
 ```
 ## 2. Setup Conda Environment
-Make sure your system has NVIDIA drivers and CUDA installed and then run these commands:
+Make sure your system has NVIDIA drivers and CUDA installed and then run the commands below. If you're on a Mac, you'll likely need to remove the `xformers` and `cuml-cu11` lines from `requirements.txt`.
 ```bash
 conda create -n sidewalk-tagger-ai python=3.10
 conda activate sidewalk-tagger-ai
 conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install -r requirements.txt
 pip install xformers --index-url https://download.pytorch.org/whl/cu118
+pip install matplotlib timm
 ```
 ## 3. Download & Preprocess Test Dataset
 Make sure you are still in the conda environment that we just created.
