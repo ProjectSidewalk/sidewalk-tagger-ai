@@ -33,3 +33,4 @@ rm -rf Obstacle
 rm -rf Obstacle.zip
 
 python crop.py
+
