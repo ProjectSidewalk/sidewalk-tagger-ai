@@ -19,6 +19,9 @@ import timm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+if not torch.cuda.is_available():
+    os.environ['XFORMERS_DISABLED'] = '1'
+
 from dinov2.models.vision_transformer import vit_small, vit_base, vit_large, vit_giant2
 
 
