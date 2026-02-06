@@ -13,6 +13,7 @@ wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/ma
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-curbramp-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-obstacle-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-surfaceproblem-tags-best.pth?download=true
+wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-crosswalk-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-curbramp-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-obstacle-tags-best.pth?download=true
 wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-surfaceproblem-tags-best.pth?download=true
