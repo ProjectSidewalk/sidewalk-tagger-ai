@@ -1,3 +1,4 @@
+import argparse
 import json
 import math
 import shutil
@@ -19,6 +20,7 @@ import timm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Prevent xformers from crashing during CPU-only execution.
 if not torch.cuda.is_available():
     os.environ['XFORMERS_DISABLED'] = '1'
 
@@ -116,22 +118,15 @@ class CLIP_Classifier(nn.Module):
     def __init__(self, model_name='', n_target_classes=7):
         super().__init__()
         self.model = timm.create_model(model_name=model_name, pretrained=True, in_chans=3)
-        #         Replace the final head layers in model with our own Linear layer
+        # Replace the final head with a two-layer classifier.
         num_features = self.model.num_features
         self.model.head = nn.Linear(num_features, 256)
         self.fully_connect = nn.Sequential(nn.Linear(256, 128),
                                            nn.ReLU(),
                                            nn.Linear(128, n_target_classes))
 
-        # self.model.load_state_dict(torch.load('{}/'.format(local_directory) + model_name, map_location=torch.device(device)))
-
-        # self.transformer = deepcopy(self.model)
-
     def forward(self, image):
         x = self.model(image)
-        # Using dropout functions to randomly shutdown some of the nodes in hidden layers to prevent overfitting.
-        #         x = self.dropout(x)
-        #         # Concatenate the metadata into the results.
         x = self.fully_connect(x)
         return x
 
@@ -140,27 +135,23 @@ def get_labels_ref_for_run(inference_set_dir):
     csv_file_path = os.path.join(inference_set_dir, 'test.csv')
     label_data = pd.read_csv(csv_file_path)
 
-    # get the header row
     header_row = label_data.columns.tolist()
-
     print(header_row)
 
-    # get the index of 'validated_by' column
     if 'validated_by' in header_row:
         validated_by_index = header_row.index('validated_by')
     else:
         validated_by_index = header_row.index('normalized_y')
 
-    # get everything after 'validated_by' column
     labels_ref_for_run = header_row[validated_by_index + 1:]
 
-    # update c12n_category_offset
+    # Side effect: sets c12n_category_offset so images_loader reads the correct label columns.
+    # This function must be called before images_loader.
     global c12n_category_offset
     c12n_category_offset = validated_by_index + 1
 
-    # for the unvalidated data model we don't have the newly added tags e.g. mailbox, seating etc.
-    # but for the DINO model, trained on the validated data, we do have them in the training data.
-    # we need to adjust the labels_ref_for_run for the CLIP model
+    # For obstacle/unvalidated: the validated test set has 3 extra tags (mailbox, seating, uneven-slanted) that the
+    # unvalidated-trained model was never trained on, so strip them.
     if params['label_type'] == 'obstacle' and params['dataset_type'] == 'unvalidated':
         if len(labels_ref_for_run) == 20:
             labels_ref_for_run = labels_ref_for_run[:-3]
@@ -182,45 +173,58 @@ MODEL_PREFIXES = {
 }
 
 # ------------------------------
-# all the parameters to be customized for the run
+# Parse CLI arguments
 # ------------------------------
+parser = argparse.ArgumentParser(description="Run model evaluation on the test dataset.")
+parser.add_argument(
+    "--label-type", type=str, default="crosswalk",
+    choices=["crosswalk", "curbramp", "surfaceproblem", "obstacle"],
+    help="Label type to evaluate",
+)
+parser.add_argument(
+    "--model", type=str, default="DINO", choices=["DINO", "CLIP"],
+    help="Model backbone to use",
+)
+parser.add_argument(
+    "--dataset-type", type=str, default="validated", choices=["validated", "unvalidated"],
+    help="Whether to use the validated or unvalidated trained model",
+)
+parser.add_argument(
+    "--min-instances", type=int, default=10,
+    help="Suppress tags with fewer than this many ground-truth positives from plots and aggregate metrics",
+)
+parser.add_argument(
+    "--min-threshold", type=float, default=0.3,
+    help="Minimum confidence threshold floor for binary predictions",
+)
+args = parser.parse_args()
 
 params = {
-    'label_type': 'crosswalk',
-    'pretrained_model_prefix': MODEL_PREFIXES['DINO'],
-    'dataset_type': 'validated',  # 'unvalidated' or 'validated'
-
-    # these don't really change for now
+    'label_type': args.label_type,
+    'pretrained_model_prefix': MODEL_PREFIXES[args.model],
+    'dataset_type': args.dataset_type,
     'c12n_category': C12N_CATEGORIES['TAGS'],
     'inference_set_dir_name': 'test',
-    'min_threshold': 0.3
+    'min_threshold': args.min_threshold,
 }
+
+min_instances = args.min_instances
 
 # ------------------------------
-
-# suppress the tags that have less than the threshold count in the plot
-suppress_thresholds = {
-    'crosswalk': 10,
-    'obstacle': 10,
-    'surfaceproblem': 10,
-    'curbramp': 10
-}
 
 image_dimension = 256
 
 if params['pretrained_model_prefix'] == MODEL_PREFIXES['CLIP']:
     image_dimension = 224
 
-# This is what DinoV2 sees
 target_size = (image_dimension, image_dimension)
 
 # for temporarily skipping some cities
 skip_cities = []
 # skip_cities = ['oradell', 'walla_walla', 'cdmx', 'spgg', 'chicago', 'amsterdam', 'columbus', 'newberg']
 
-dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags-archive
-# dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-validated'  # example: crops-surfaceproblem-tags-archive
-dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags-archive
+dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags
+dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags
 results_dir_path = '../results/' + params['label_type']  # example: ../results/curbramp
 
 inference_dataset_dir = Path(dataset_dir_path + "/" + params['inference_set_dir_name'])
@@ -228,7 +232,8 @@ inference_dataset_dir = Path(dataset_dir_path + "/" + params['inference_set_dir_
 # top tp, fp, fn, tn images are saved here
 inference_results_dir = Path("../inference-results")
 
-model_name = 'models/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-cls-b-' + params['label_type'] + '-' + params['c12n_category'] + '-best.pth'
+model_name = ('models/' + params['dataset_type'] + '-' + params['pretrained_model_prefix']
+              + '-cls-b-' + params['label_type'] + '-' + params['c12n_category'] + '-best.pth')
 # ------------------------------
 
 local_directory = os.getcwd()
@@ -279,7 +284,6 @@ def images_loader(dir_path, batch_size, imgsz, transform):
             if city in skip_cities:
                 continue
 
-
             img = Image.open(os.path.join(dir_path, filename))
             img = img.convert('RGB')
             if img is not None:
@@ -316,7 +320,6 @@ def data_loader(dir_path, batch_size, imgsz, transform):
 
 # -----------------------------------------------------------------
 
-# todo this needs a better name!
 labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
 
 
@@ -397,10 +400,8 @@ def check_for_mutual_exclusivity_and_total(tp_set, fp_set, fn_set, tn_set, image
 # when invert=True, the same column selection (based on positive frequency) is kept, but labels
 # and predictions are flipped so we score the "tag NOT applied" class.
 def compute_overall_f1(yt, yp, invert=False):
-    # exclude the columns where the ground truth are less than the minimum frequency threshold
-    # this is to suppress the tags that are not very common
-
-    col_mask = np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]
+    # Exclude tags with too few ground-truth positives (controlled by --min-instances).
+    col_mask = np.sum(yt, axis=0) >= min_instances
     y_true_np_selected = yt[:, col_mask]
     y_pred_np_selected = yp[:, col_mask]
 
@@ -479,7 +480,7 @@ def inference_on_validation_data(inference_model):
 
     # ------------------------------ #
 
-    # Compute the overall F1 score. This function internally takes into account the suppress thresholds and leaves out the tags that have less than the threshold count.
+    # Compute overall F1; tags below min_instances are excluded (same filter as per-tag plots).
     f1_micro_selected, f1_macro_selected, f1_weighted_selected = compute_overall_f1(y_true_np, y_pred_np)
     f1_micro_selected_neg, f1_macro_selected_neg, f1_weighted_selected_neg = compute_overall_f1(y_true_np, y_pred_np, invert=True)
 
@@ -550,12 +551,7 @@ def inference_on_validation_data(inference_model):
         if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
             print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
 
-        # don't plot if there are no instances of the tag in the ground truth labels
-        st = suppress_thresholds[params['label_type']]
-        if params['label_type'] not in suppress_thresholds:
-            st = 0
-
-        if n_instances < st:
+        if n_instances < min_instances:
             tags_not_plotted.append((tag_name, n_instances))
             continue
 
@@ -653,14 +649,13 @@ def inference_on_validation_data(inference_model):
     fig.tight_layout()
 
     pt_model_prefix = params['pretrained_model_prefix']
-    inf_set_dir_name = params['inference_set_dir_name']
     dataset_type = params['dataset_type']
 
     os.makedirs(results_dir_path, exist_ok=True)
-    if suppress_thresholds[params['label_type']] > 0:
-        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}.svg')
+    if min_instances > 0:
+        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve.svg')
     else:
-        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}-all.svg')
+        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-all.svg')
 
     # Negative-class figure finalization.
     mean_average_precision_neg = sum(all_average_precisions_negative) / len(all_average_precisions_negative)
@@ -683,10 +678,10 @@ def inference_on_validation_data(inference_model):
     fig_neg.suptitle(plot_title_str_neg, fontsize=16)
     fig_neg.tight_layout()
 
-    if suppress_thresholds[params['label_type']] > 0:
-        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative-{inf_set_dir_name}.svg')
+    if min_instances > 0:
+        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative.svg')
     else:
-        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative-{inf_set_dir_name}-all.svg')
+        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative-all.svg')
 
     plt.show()
 
@@ -712,8 +707,8 @@ classifier.eval()
 
 inference_on_validation_data(inference_model=classifier)
 
-output_file_name = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats' + '-' + params['inference_set_dir_name'] + '.json'
-output_file_name_negative = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats-negative' + '-' + params['inference_set_dir_name'] + '.json'
+output_file_name = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats.json'
+output_file_name_negative = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats-negative.json'
 
 # save the results to a file
 with open(output_file_name, 'w') as f:

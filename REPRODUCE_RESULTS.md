@@ -40,28 +40,25 @@ This can take a long time depending on your system specs.
 ## 4. Test
 Make sure you are still in the conda environment that we created.
 
-In the `notebooks/test.py` file, there is a section called `params`.
-
-```python
-params = {
-    'label_type': 'crosswalk', # 'crosswalk' 'curbramp' 'surfaceproblem' 'obstacle'
-    'pretrained_model_prefix': MODEL_PREFIXES['DINO'], # 'DINO' or 'CLIP'
-    'dataset_type': 'validated', # 'unvalidated' or 'validated'
-    # ...
-}
-```
-
-You should change these options to whatever you want to test. 
-
-Now, we just run the test script!
+Run the test script with the desired label type, model, and dataset type:
 ```bash
 cd notebooks
-python test.py
+python evaluate.py --label-type crosswalk --model DINO --dataset-type validated
 ```
 
-Results are visible here:
+All arguments have defaults (`--label-type crosswalk`, `--model DINO`, `--dataset-type validated`), so you can omit any you don't need to change. You can also pass `--min-instances` (default 10) to control how many ground-truth positives a tag needs in order to appear in plots and aggregate metrics.
 
-![image](https://github.com/user-attachments/assets/52d19021-00c0-454a-aced-1cf15f9feaee)
+Results are written to `results/<label-type>/`.
+
 ![image](https://github.com/user-attachments/assets/e3c16ce4-ffb2-44a6-ab6d-e44928011dac)
 
-You can repeat this process of specifying the params and running the test script until you are satisfied.
+You can repeat this for each label type / model / dataset-type combination you want to evaluate.
+
+## 5. Generate precision-vs-threshold graph
+After running `evaluate.py`, generate the precision-vs-threshold plot and threshold CSV:
+```bash
+cd notebooks
+python analyze_thresholds.py --label-type crosswalk --target-precision 0.92
+```
+
+This reads `results/<label-type>/validated-dino-inference-stats.json` by default and writes a PNG and CSV to the same directory. Pass `--stats-file`, `--output-plot`, and `--output-csv` to override specific paths.

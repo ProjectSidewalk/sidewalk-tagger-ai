@@ -37,7 +37,7 @@ There are two main notebooks to train DINOv2 and CLIP-ViT models:
 - `notebooks/dino-trainer.ipynb`: Train DINOv2 model.
 - `notebooks/clip-vit-trainer.ipynb`: Train CLIP-ViT model.
 
-Both notebooks use a pretrained model and fine-tune it on the Project Sidewalk dataset and provide customizable training for different label types (e.g. curb ramps, surface problems). The `test.py` script evaluates the models and creates visualization of the results.
+Both notebooks use a pretrained model and fine-tune it on the Project Sidewalk dataset and provide customizable training for different label types (e.g. curb ramps, surface problems). The `evaluate.py` script evaluates the models and creates visualization of the results.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ Both `dino-trainer.ipynb` and `clip-vit-trainer.ipynb` require the same dataset 
 
 ### Evaluation
 
-- Use the `notebooks/test.py` to evaluate the model on the test dataset. Adjust the fields in `params` object as needed.
+- Use `notebooks/evaluate.py` to evaluate the model on the test dataset. Pass `--label-type`, `--model`, and `--dataset-type` as CLI args.
 - The model should be available in the `models` directory. The naming format for the model file is `[validated|unvalidated]-[dino|clip]-cls-b-<label_type>-tags-best.pth` e.g. `validated-dino-cls-b-surfaceproblem-tags-best.pth`.
 - The test dataset should be available in the `../datasets/crops-<label_type>-tags/test/` directory. The directory should contain the images and the correspoding CSV file with ground truth labels. The CSV file should be named as `test.csv`.
 - The script will save the inference results in the `../datasets/crops-<label_type>-tags/` directory.

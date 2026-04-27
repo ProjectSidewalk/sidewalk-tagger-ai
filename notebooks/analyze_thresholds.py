@@ -28,6 +28,8 @@ def aligned_arrays(tag_stats: dict):
     recall = np.asarray(tag_stats["recall"], dtype=float)
     thresholds = np.asarray(tag_stats["thresholds"], dtype=float)
 
+    # sklearn's precision_recall_curve appends a sentinel point (precision=1, recall=0) with no corresponding threshold,
+    # so precision/recall are one element longer than thresholds.
     if len(precision) == len(thresholds) + 1:
         precision, recall = precision[:-1], recall[:-1]
 
@@ -62,6 +64,8 @@ def pick_threshold_for_target_precision(
             "max_precision_threshold": float(thresholds[max_idx]),
         }
 
+    # Among thresholds that meet the target, maximise recall. The tiny 1e-12 * threshold term breaks exact ties by
+    # preferring the lower (less aggressive) threshold.
     best_idx = int(meets_target[np.argmax(recall[meets_target] - (thresholds[meets_target] * 1e-12))])
     max_idx = int(np.argmax(precision))
 
@@ -99,7 +103,7 @@ def _build_rows(tag_stats_map: dict, min_instances: int, target_precision: float
     return rows
 
 
-def plot_precision_vs_threshold(tag_stats_map: dict, target_precision: float, min_instances: int, output_plot: Path, direction: str = "positive"):
+def plot_precision_vs_threshold(tag_stats_map: dict, target_precision: float, min_instances: int, output_plot: Path, direction: str = "positive", title: str = ""):
     try:
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:
@@ -140,14 +144,15 @@ def plot_precision_vs_threshold(tag_stats_map: dict, target_precision: float, mi
     ax.axhline(y=target_precision, color="black", linestyle="--", linewidth=1.2,
                label=f"Target precision = {target_precision:.2f}")
 
+    title_suffix = f" — {title}" if title else ""
     if direction == "negative":
         ax.set_xlabel("(1 − confidence) threshold")
         ax.set_ylabel("Precision (negative class: tag NOT applied)")
-        ax.set_title("Precision vs (1 − Confidence) Threshold — negative class")
+        ax.set_title(f"Precision vs (1 − Confidence) Threshold — negative class{title_suffix}")
     else:
         ax.set_xlabel("Confidence threshold")
         ax.set_ylabel("Precision")
-        ax.set_title("Precision vs Confidence Threshold (Validated DINOv2 Crosswalk)")
+        ax.set_title(f"Precision vs Confidence Threshold{title_suffix}")
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.05)
     ax.grid(True, alpha=0.3)
@@ -183,24 +188,20 @@ def save_summary_csv(rows, output_csv: Path):
 
 
 def _negative_path(path: Path) -> Path:
-    """Insert '-negative' before the last hyphen-separated segment of the stem.
-
-    e.g. validated-dino-inference-stats.json -> validated-dino-inference-stats-negative.json
-    """
-    parts = path.stem.rsplit("-", 1)
-    if len(parts) == 2:
-        return path.parent / (parts[0] + "-negative-" + parts[1] + path.suffix)
     return path.parent / (path.stem + "-negative" + path.suffix)
 
 
 def _run_direction(stats_file, target_precision, min_instances, output_plot, output_csv, skip_plot, direction):
     tag_stats_map = load_tag_stats(stats_file)
 
+    # Derive a human-readable title from the file path, e.g., "validated-dino / crosswalk".
+    title = f"{stats_file.stem.split('-inference')[0]} / {stats_file.parent.name}"
+
     if skip_plot:
         rows = _build_rows(tag_stats_map, min_instances, target_precision)
     else:
         try:
-            rows = plot_precision_vs_threshold(tag_stats_map, target_precision, min_instances, output_plot, direction)
+            rows = plot_precision_vs_threshold(tag_stats_map, target_precision, min_instances, output_plot, direction, title)
         except ModuleNotFoundError as exc:
             raise SystemExit(str(exc))
 
@@ -237,9 +238,15 @@ def main():
         description="Plot precision vs confidence threshold from test.py stats JSON and identify threshold points."
     )
 
-    parser.add_argument("--stats-file", type=Path,
-        default=REPO_ROOT / Path("results/crosswalk/validated-dino-inference-stats.json"),
-        help="Path to positive-direction JSON output from notebooks/test.py")
+    parser.add_argument(
+        "--label-type", type=str, default="crosswalk",
+        choices=["crosswalk", "curbramp", "surfaceproblem", "obstacle"],
+        help="Label type; used to derive default --stats-file / --output-* paths",
+    )
+
+    parser.add_argument("--stats-file", type=Path, default=None,
+        help="Path to positive-direction JSON output from notebooks/test.py "
+             "(default: results/<label-type>/validated-dino-inference-stats.json)")
 
     parser.add_argument("--target-precision", type=float, default=0.92,
                         help="Target precision (default: 0.92)")
@@ -247,13 +254,13 @@ def main():
     parser.add_argument("--min-instances", type=int, default=10,
                         help="Only include tags with at least this many GT positives")
 
-    parser.add_argument("--output-plot", type=Path,
-        default=REPO_ROOT / Path("results/crosswalk/validated-dino-precision-vs-threshold.png"),
-        help="Output image path for positive direction")
+    parser.add_argument("--output-plot", type=Path, default=None,
+        help="Output image path for positive direction "
+             "(default: results/<label-type>/validated-dino-precision-vs-threshold.png)")
 
-    parser.add_argument("--output-csv", type=Path,
-        default=REPO_ROOT / Path("results/crosswalk/validated-dino-thresholds-at-target-precision.csv"),
-        help="Output CSV path for positive direction")
+    parser.add_argument("--output-csv", type=Path, default=None,
+        help="Output CSV path for positive direction "
+             "(default: results/<label-type>/validated-dino-thresholds-at-target-precision.csv)")
 
     parser.add_argument("--skip-plot", action="store_true",
                         help="Skip graph generation and only write CSV summaries")
@@ -269,6 +276,15 @@ def main():
 
     args = parser.parse_args()
 
+    # Resolve path defaults from --label-type when not provided explicitly.
+    label_type = args.label_type
+    if args.stats_file is None:
+        args.stats_file = REPO_ROOT / f"results/{label_type}/validated-dino-inference-stats.json"
+    if args.output_plot is None:
+        args.output_plot = REPO_ROOT / f"results/{label_type}/validated-dino-precision-vs-threshold.png"
+    if args.output_csv is None:
+        args.output_csv = REPO_ROOT / f"results/{label_type}/validated-dino-thresholds-at-target-precision.csv"
+
     if not (0.0 <= args.target_precision <= 1.0):
         raise ValueError("--target-precision must be between 0 and 1")
 
@@ -282,6 +298,7 @@ def main():
         direction="positive",
     )
 
+    # Negative stats file is auto-derived by appending '-negative' to the positive stats filename.
     neg_stats_file = args.stats_file_negative or _negative_path(args.stats_file)
     if not neg_stats_file.exists():
         print(f"\nNegative stats file not found ({neg_stats_file}), skipping negative direction.")
