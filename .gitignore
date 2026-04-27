@@ -9,3 +9,11 @@ dist/
 *.swp
 
 .vscode/
+.idea/
+
+# Files downloaded while using the repo that shouldn't be checked in.
+dinov2_vitb14_reg4_pretrain.pth
+notebooks/models/
+datasets/
+inference-results/
+results/

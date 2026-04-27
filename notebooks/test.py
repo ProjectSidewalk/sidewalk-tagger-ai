@@ -221,6 +221,7 @@ skip_cities = []
 dataset_dirname = 'crops-' + params['label_type'] + '-' + params['c12n_category']  # example: crops-surfaceproblem-tags-archive
 # dataset_dirname = 'crops-' + label_type + '-' + c12n_category + '-validated'  # example: crops-surfaceproblem-tags-archive
 dataset_dir_path = '../datasets/' + dataset_dirname  # example: ../datasets/crops-surfaceproblem-tags-archive
+results_dir_path = '../results/' + params['label_type']  # example: ../results/curbramp
 
 inference_dataset_dir = Path(dataset_dir_path + "/" + params['inference_set_dir_name'])
 
@@ -320,6 +321,7 @@ labels_ref_for_run = get_labels_ref_for_run(inference_dataset_dir)
 
 
 all_tag_to_prediction_stats = {}
+all_tag_to_prediction_stats_negative = {}
 all_tag_to_prediction_details = {}
 
 images_and_labels = data_loader(inference_dataset_dir, 1, image_dimension, 'inference')
@@ -392,12 +394,19 @@ def check_for_mutual_exclusivity_and_total(tp_set, fp_set, fn_set, tn_set, image
 
 
 # computes micro, macro, and weighted f1 scores at the fixed confidence threshold in params
-def compute_overall_f1(yt, yp):
+# when invert=True, the same column selection (based on positive frequency) is kept, but labels
+# and predictions are flipped so we score the "tag NOT applied" class.
+def compute_overall_f1(yt, yp, invert=False):
     # exclude the columns where the ground truth are less than the minimum frequency threshold
     # this is to suppress the tags that are not very common
 
-    y_true_np_selected = yt[:, np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]]
-    y_pred_np_selected = yp[:, np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]]
+    col_mask = np.sum(yt, axis=0) >= suppress_thresholds[params['label_type']]
+    y_true_np_selected = yt[:, col_mask]
+    y_pred_np_selected = yp[:, col_mask]
+
+    if invert:
+        y_true_np_selected = 1 - y_true_np_selected
+        y_pred_np_selected = 1 - y_pred_np_selected
 
     # Convert predicted probabilities to binary predictions
     y_pred_binary_selected = (y_pred_np_selected >= params['min_threshold']).astype(int)
@@ -472,6 +481,7 @@ def inference_on_validation_data(inference_model):
 
     # Compute the overall F1 score. This function internally takes into account the suppress thresholds and leaves out the tags that have less than the threshold count.
     f1_micro_selected, f1_macro_selected, f1_weighted_selected = compute_overall_f1(y_true_np, y_pred_np)
+    f1_micro_selected_neg, f1_macro_selected_neg, f1_weighted_selected_neg = compute_overall_f1(y_true_np, y_pred_np, invert=True)
 
     # Create a list of tuples (tag, precision, recall, n_instances)
     # sum the columns of y_true_np to get the number of instances in the ground truth labels
@@ -481,11 +491,14 @@ def inference_on_validation_data(inference_model):
     tag_to_n_instances.sort(key=lambda x: x[1], reverse=True)
 
     fig, ax1 = plt.subplots(1, 1, figsize=(16, 12))
+    fig_neg, ax_neg = plt.subplots(1, 1, figsize=(16, 12))
 
     tags_not_plotted = []
 
     all_average_precisions = []
     all_f1_scores_test = []
+    all_average_precisions_negative = []
+    all_f1_scores_test_negative = []
 
     for i in range(len(tag_to_n_instances)):
 
@@ -517,6 +530,23 @@ def inference_on_validation_data(inference_model):
         all_tag_to_prediction_stats[tag_name] = {'n_instances': n_instances, 'precision': precision.tolist(), 'recall': recall.tolist(),
                                                                'thresholds': thresholds_pr.tolist(), 'pr_auc': pr_auc, 'average_precision_val': average_precision_val}
 
+        # Negative-class PR: treat "tag NOT applied" as the positive class by flipping labels/scores. Thresholds are on
+        # the (1 - y_pred) scale, so higher = more confident negative prediction (mirrors the positive plot convention).
+        neg_score = 1 - y_pred_np[:, tag_idx]
+        neg_true = 1 - y_true_np[:, tag_idx]
+        neg_precision, neg_recall, neg_thresholds_pr = precision_recall_curve(neg_true, neg_score, pos_label=1)
+        neg_pr_auc = auc(neg_recall, neg_precision)
+        neg_ap = average_precision_score(neg_true, neg_score, average='weighted')
+        n_instances_negative = int(y_true_np.shape[0] - n_instances)
+        all_tag_to_prediction_stats_negative[tag_name] = {
+            'n_instances': n_instances_negative,
+            'precision': neg_precision.tolist(),
+            'recall': neg_recall.tolist(),
+            'thresholds': neg_thresholds_pr.tolist(),
+            'pr_auc': neg_pr_auc,
+            'average_precision_val': neg_ap,
+        }
+
         if len(np.unique(y_true_np[:, tag_idx])) < 2 or len(np.unique(y_pred_np[:, tag_idx])) < 2:
             print('For tag {} all instances of y_true: {}'.format(tag_name, np.unique(y_true_np[:, tag_idx])))
 
@@ -531,14 +561,28 @@ def inference_on_validation_data(inference_model):
 
         # note: this should be done after the suppression part
         all_average_precisions.append(average_precision_val)
+        all_average_precisions_negative.append(neg_ap)
 
         # this is just for testing.
         y_pred_binary_05 = np.where(y_pred_np[:, tag_idx] >= params['min_threshold'], 1, 0)
         all_f1_scores_test.append(f1_score(y_true_np[:, tag_idx], y_pred_binary_05))
 
+        y_pred_binary_05_neg = np.where(neg_score >= params['min_threshold'], 1, 0)
+        all_f1_scores_test_negative.append(f1_score(neg_true, y_pred_binary_05_neg))
+
         # Create a PrecisionRecallDisplay and plot it on the same axis
         # pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + ' (n={})'.format(n_instances))
         pr_display = PrecisionRecallDisplay(precision=precision, recall=recall).plot(ax=ax1, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, f1={})\n(prec={}, rec={})'.format(n_instances, round(pr_auc, 2), round(average_precision_val, 2), round(best_thresh_pr, 2), round(f1_at_conf, 2), round(precision_at_conf, 2), round(recall_at_conf, 2)))
+
+        # Negative-class counterpart: best threshold by F1, then plot on ax_neg.
+        neg_denominator = (neg_precision + neg_recall)
+        neg_all_f1_pr = np.where(neg_denominator != 0, 2 * neg_precision * neg_recall / neg_denominator, 0)
+        neg_ix_pr = np.argmax(neg_all_f1_pr)
+        neg_best_thresh_pr = neg_thresholds_pr[neg_ix_pr]
+        if neg_best_thresh_pr < params['min_threshold']:
+            neg_best_thresh_pr = params['min_threshold']
+        neg_precision_at_conf, neg_recall_at_conf, neg_f1_at_conf = get_precision_recall_f1_at_conf(neg_true, neg_score, neg_best_thresh_pr)
+        PrecisionRecallDisplay(precision=neg_precision, recall=neg_recall).plot(ax=ax_neg, name=tag_name + '\n(n={}, AUC={}, AP={})\n(conf={}, f1={})\n(prec={}, rec={})'.format(n_instances_negative, round(neg_pr_auc, 2), round(neg_ap, 2), round(neg_best_thresh_pr, 2), round(neg_f1_at_conf, 2), round(neg_precision_at_conf, 2), round(neg_recall_at_conf, 2)))
 
 
         # Create a RocCurveDisplay and plot it on the same axis
@@ -605,18 +649,44 @@ def inference_on_validation_data(inference_model):
                        ' | ' + 'Threshold: ' + str(params['min_threshold']))
 
     # Set title for the figure and save
-    plt.suptitle(plot_title_str, fontsize=16)
-
-    plt.tight_layout()
+    fig.suptitle(plot_title_str, fontsize=16)
+    fig.tight_layout()
 
     pt_model_prefix = params['pretrained_model_prefix']
     inf_set_dir_name = params['inference_set_dir_name']
     dataset_type = params['dataset_type']
 
+    os.makedirs(results_dir_path, exist_ok=True)
     if suppress_thresholds[params['label_type']] > 0:
-        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}.svg')
+        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}.svg')
     else:
-        plt.savefig(f'{dataset_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}-all.svg')
+        fig.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-{inf_set_dir_name}-all.svg')
+
+    # Negative-class figure finalization.
+    mean_average_precision_neg = sum(all_average_precisions_negative) / len(all_average_precisions_negative)
+    manual_average_f1_neg = sum(all_f1_scores_test_negative) / len(all_f1_scores_test_negative)
+
+    ax_neg.legend(title='Classes', fontsize='12', bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax_neg.set_title('Precision-Recall Curve (negative class: tag NOT applied)')
+
+    plot_title_str_neg = 'PR Curve (negative class — tag NOT applied) for label type: ' + params['label_type']
+    plot_title_str_neg += '\nTest set size: ' + str(len(images_and_labels)) + ' images'
+    plot_title_str_neg += '\nModel: ' + model_display_name
+    plot_title_str_neg += ' | Train dataset: ' + params['dataset_type']
+    plot_title_str_neg += ('\nmAP: ' + str(round(mean_average_precision_neg, 2)) +
+                           ' | ' + 'Micro F1: ' + str(round(f1_micro_selected_neg, 2)) +
+                           ' | ' + 'Macro F1: ' + str(round(f1_macro_selected_neg, 2)) +
+                           ' | ' + 'Weighted F1: ' + str(round(f1_weighted_selected_neg, 2)) +
+                           ' | ' + 'Manual avg.: ' + str(round(manual_average_f1_neg, 2)) +
+                           ' | ' + 'Threshold: ' + str(params['min_threshold']))
+
+    fig_neg.suptitle(plot_title_str_neg, fontsize=16)
+    fig_neg.tight_layout()
+
+    if suppress_thresholds[params['label_type']] > 0:
+        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative-{inf_set_dir_name}.svg')
+    else:
+        fig_neg.savefig(f'{results_dir_path}/{dataset_type}-{pt_model_prefix}-pr-curve-negative-{inf_set_dir_name}-all.svg')
 
     plt.show()
 
@@ -642,7 +712,8 @@ classifier.eval()
 
 inference_on_validation_data(inference_model=classifier)
 
-output_file_name = dataset_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats' + '-' + params['inference_set_dir_name'] + '.json'
+output_file_name = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats' + '-' + params['inference_set_dir_name'] + '.json'
+output_file_name_negative = results_dir_path + '/' + params['dataset_type'] + '-' + params['pretrained_model_prefix'] + '-inference-stats-negative' + '-' + params['inference_set_dir_name'] + '.json'
 
 # save the results to a file
 with open(output_file_name, 'w') as f:
@@ -656,3 +727,9 @@ with open(output_file_name, 'w') as f:
     f.write(json.dumps(all_stats, indent=4))
 
     print("-------------------")
+
+with open(output_file_name_negative, 'w') as f:
+    all_stats_negative = {
+        'category_to_prediction_stats': all_tag_to_prediction_stats_negative,
+    }
+    f.write(json.dumps(all_stats_negative, indent=4))
