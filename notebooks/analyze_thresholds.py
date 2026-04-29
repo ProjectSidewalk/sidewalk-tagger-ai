@@ -412,9 +412,10 @@ def build_deployment_rows(pos_rows: list, neg_rows: list) -> list:
       ┌────────────┬────────────┬──────────────┬───────────────────────────────────────────────────────────┐
       │ pos        │ neg        │ status       │ deployment scheme                                         │
       ├────────────┼────────────┼──────────────┼───────────────────────────────────────────────────────────┤
-      │ qualified  │ qualified  │ ready        │ Disjoint: ADD when conf > T_neg, REMOVE when conf < T_pos.│
-      │            │            │              │ Each side uses the OPPOSITE direction's threshold as a    │
-      │            │            │              │ stricter boundary, leaving a silent zone in between.      │
+      │ qualified  │ qualified  │ ready        │ If T_neg ≥ T_pos: disjoint scheme — ADD when conf > T_neg,│
+      │            │            │              │ REMOVE when conf < T_pos, silent zone in between.         │
+      │            │            │              │ If T_neg < T_pos (thresholds overlap): direct scheme —    │
+      │            │            │              │ ADD when conf ≥ T_pos, REMOVE when conf ≤ T_neg.          │
       ├────────────┼────────────┼──────────────┼───────────────────────────────────────────────────────────┤
       │ qualified  │ failed     │ add_only     │ ADD when conf ≥ T_pos. No REMOVE deployed.                │
       ├────────────┼────────────┼──────────────┼───────────────────────────────────────────────────────────┤
@@ -423,13 +424,14 @@ def build_deployment_rows(pos_rows: list, neg_rows: list) -> list:
       │ failed     │ failed     │ not_ready    │ Nothing deployed.                                         │
       └────────────┴────────────┴──────────────┴───────────────────────────────────────────────────────────┘
 
-    Important consequence: `add_threshold` and `remove_threshold` do NOT have a uniform interpretation across rows. In
-    the `ready` case they are set to the OPPOSITE direction's threshold (the tighter boundary of the disjoint schema);
-    in the partial cases they are set to the SAME direction's threshold (the only one validated). The
-    `deployment_status` column is the disambiguator. The threshold's *usage* in production code is constant —
-    `conf > add_threshold` for ADD, `conf < remove_threshold` for REMOVE — but the underlying validation chain differs.
+    Important consequence: `add_threshold` and `remove_threshold` do NOT have a uniform interpretation across rows.
+    In the `ready` disjoint case they are set to the OPPOSITE direction's threshold (the tighter boundary); in the
+    `ready` direct case and partial cases they are set to the SAME direction's threshold. The `deployment_status`
+    column is the disambiguator. The threshold's *usage* in production code is constant — `conf > add_threshold` for
+    ADD, `conf < remove_threshold` for REMOVE — but the underlying validation chain differs.
 
-    Going from `add_only` to `ready` raises (tightens) the ADD bar; same for REMOVE / `remove_only` → `ready`.
+    Going from `add_only` to `ready` raises (tightens) the ADD bar when the disjoint scheme applies; same for REMOVE /
+    `remove_only` → `ready`. When the direct scheme applies the bars are the same as the partial cases.
     """
     pos_by_tag = {r["tag"]: r for r in pos_rows}
     neg_by_tag = {r["tag"]: r for r in neg_rows}
@@ -475,33 +477,59 @@ def build_deployment_rows(pos_rows: list, neg_rows: list) -> list:
         }
 
         if status == "ready":
-            # Disjoint scheme. ADD = conf > T_neg, REMOVE = conf < T_pos. Counts come from the OPPOSITE
-            # direction's confusion matrix:
-            #   • neg["tn"] = positives at conf > T_neg → true ADD.
-            #   • neg["fn"] = negatives at conf > T_neg → false ADD.
-            #   • pos["tn"] = negatives at conf < T_pos → true REMOVE.
-            #   • pos["fn"] = positives at conf < T_pos → false REMOVE.
-            add_tp = neg["tn"]
-            add_fp = neg["fn"]
-            add_n = add_tp + add_fp
-            row["add_threshold"] = neg["selected_threshold"]
-            row["add_tp"] = add_tp
-            row["add_fp"] = add_fp
-            row["add_precision"] = add_tp / add_n if add_n > 0 else 0.0
-            row["add_recall"] = add_tp / n_test_pos if n_test_pos > 0 else 0.0
+            # User-facing thresholds: ADD when conf > t_neg, REMOVE when conf < t_pos.
+            t_neg = neg["selected_threshold"]  # 1 − neg_raw; tag absent predicted below this
+            t_pos = pos["selected_threshold"]  # pos_raw; tag present predicted above this
 
-            remove_tp = pos["tn"]
-            remove_fp = pos["fn"]
-            remove_n = remove_tp + remove_fp
-            row["remove_threshold"] = pos["selected_threshold"]
-            row["remove_tp"] = remove_tp
-            row["remove_fp"] = remove_fp
-            row["remove_precision"] = remove_tp / remove_n if remove_n > 0 else 0.0
-            row["remove_recall"] = remove_tp / n_test_neg if n_test_neg > 0 else 0.0
+            if t_neg >= t_pos:
+                # Disjoint scheme: ADD zone (conf > T_neg) and REMOVE zone (conf < T_pos) have a silent zone
+                # in between. Counts come from the OPPOSITE direction's confusion matrix:
+                #   • neg["tn"] = positives at conf > T_neg → true ADD.
+                #   • neg["fn"] = negatives at conf > T_neg → false ADD.
+                #   • pos["tn"] = negatives at conf < T_pos → true REMOVE.
+                #   • pos["fn"] = positives at conf < T_pos → false REMOVE.
+                add_tp = neg["tn"]
+                add_fp = neg["fn"]
+                add_n = add_tp + add_fp
+                row["add_threshold"] = t_neg
+                row["add_tp"] = add_tp
+                row["add_fp"] = add_fp
+                row["add_precision"] = add_tp / add_n if add_n > 0 else 0.0
+                row["add_recall"] = add_tp / n_test_pos if n_test_pos > 0 else 0.0
 
-            # Silent zone = test set minus the two disjoint deployment zones.
-            row["silent_n_pos"] = max(n_test_pos - add_tp - remove_fp, 0)
-            row["silent_n_neg"] = max(n_test_neg - add_fp - remove_tp, 0)
+                remove_tp = pos["tn"]
+                remove_fp = pos["fn"]
+                remove_n = remove_tp + remove_fp
+                row["remove_threshold"] = t_pos
+                row["remove_tp"] = remove_tp
+                row["remove_fp"] = remove_fp
+                row["remove_precision"] = remove_tp / remove_n if remove_n > 0 else 0.0
+                row["remove_recall"] = remove_tp / n_test_neg if n_test_neg > 0 else 0.0
+            else:
+                # Thresholds overlap (T_neg < T_pos): the disjoint scheme would create a zone where both
+                # ADD and REMOVE fire simultaneously. Fall back to each direction's own validated threshold:
+                # ADD when conf >= T_pos, REMOVE when conf <= T_neg, silent zone T_neg <= conf <= T_pos.
+                add_tp = pos["tp"]
+                add_fp = pos["fp"]
+                add_n = add_tp + add_fp
+                row["add_threshold"] = t_pos
+                row["add_tp"] = add_tp
+                row["add_fp"] = add_fp
+                row["add_precision"] = add_tp / add_n if add_n > 0 else 0.0
+                row["add_recall"] = add_tp / n_test_pos if n_test_pos > 0 else 0.0
+
+                remove_tp = neg["tp"]
+                remove_fp = neg["fp"]
+                remove_n = remove_tp + remove_fp
+                row["remove_threshold"] = t_neg
+                row["remove_tp"] = remove_tp
+                row["remove_fp"] = remove_fp
+                row["remove_precision"] = remove_tp / remove_n if remove_n > 0 else 0.0
+                row["remove_recall"] = remove_tp / n_test_neg if n_test_neg > 0 else 0.0
+
+            # Silent zone = test set minus the two deployment zones (formula is the same for both schemes).
+            row["silent_n_pos"] = max(n_test_pos - row["add_tp"] - row["remove_fp"], 0)
+            row["silent_n_neg"] = max(n_test_neg - row["add_fp"] - row["remove_tp"], 0)
 
         elif status == "add_only":
             # ADD zone is the positive direction's predicted-positive zone (conf ≥ T_pos). The TP/FP/precision/

@@ -72,7 +72,7 @@ The script also writes `validated-dino-deployment-thresholds.csv` — a per-tag 
 
 The `deployment_status` column tells you which sides are safe to deploy:
 
-- `ready` — both directions qualified. Disjoint scheme: ADD uses `T_neg` (the negative direction's threshold) as a stricter boundary, REMOVE uses `T_pos` (the positive direction's threshold), with a silent zone in between. The `silent_n_pos`/`silent_n_neg` columns report the silent zone composition.
+- `ready` — both directions qualified. If `T_neg ≥ T_pos`: disjoint scheme — ADD uses `T_neg` as a stricter boundary, REMOVE uses `T_pos`, with a silent zone in between. If `T_neg < T_pos` (thresholds would overlap): direct scheme — ADD uses `T_pos`, REMOVE uses `T_neg`, still leaving a silent zone between them. The `silent_n_pos`/`silent_n_neg` columns report the silent zone composition.
 - `add_only` — only the positive direction qualified. `add_threshold = T_pos`. REMOVE columns are blank.
 - `remove_only` — only the negative direction qualified. `remove_threshold = T_neg`. ADD columns are blank.
 - `not_ready` — neither direction qualified. All threshold/metric columns are blank.
