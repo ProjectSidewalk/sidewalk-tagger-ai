@@ -58,7 +58,21 @@ You can repeat this for each label type / model / dataset-type combination you w
 After running `evaluate.py`, generate the precision-vs-threshold plot and threshold CSV:
 ```bash
 cd notebooks
-python analyze_thresholds.py --label-type crosswalk --target-precision 0.92
+python analyze_thresholds.py --label-type crosswalk --target-precision 0.92 --target-precision-lower-bound 0.90
 ```
 
+For each tag, the script picks the threshold that maximises recall while clearing two gates:
+
+1. Observed precision ≥ `--target-precision` (default 0.92) — the headline number.
+2. 95% Wilson lower bound on precision ≥ `max(--target-precision-lower-bound, base_rate + --min-lift-over-prior)` (defaults: 0.90 and 0.05) — the safety net. Wilson protects against fragile precision estimates from small samples; the lift requirement protects against trivial-baseline matches where the prediction just inherits the class prior (e.g., always predicting absence of a tag when the vast majority of test cases do not have the tag).
+
 This reads `results/<label-type>/validated-dino-inference-stats.json` by default and writes a PNG and CSV to the same directory. Pass `--stats-file`, `--output-plot`, and `--output-csv` to override specific paths.
+
+The script also writes `validated-dino-deployment-thresholds.csv` — a per-tag combined view for wiring the model into a recommendation system (like Project Sidewalk). Production rule is constant across rows: **ADD when `conf > add_threshold`, REMOVE when `conf < remove_threshold`**.
+
+The `deployment_status` column tells you which sides are safe to deploy:
+
+- `ready` — both directions qualified. Disjoint scheme: ADD uses `T_neg` (the negative direction's threshold) as a stricter boundary, REMOVE uses `T_pos` (the positive direction's threshold), with a silent zone in between. The `silent_n_pos`/`silent_n_neg` columns report the silent zone composition.
+- `add_only` — only the positive direction qualified. `add_threshold = T_pos`. REMOVE columns are blank.
+- `remove_only` — only the negative direction qualified. `remove_threshold = T_neg`. ADD columns are blank.
+- `not_ready` — neither direction qualified. All threshold/metric columns are blank.
