@@ -308,7 +308,7 @@ def plot_lower_bound_vs_threshold(
     bottom_margin = 0.08 if excluded_tags else 0.05
     fig.tight_layout(rect=(0, bottom_margin, 1, 1))
     output_plot.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_plot, dpi=180)
+    fig.savefig(output_plot)
     plt.close(fig)
 
     return rows
@@ -587,11 +587,11 @@ def main():
 
     parser.add_argument("--output-plot", type=Path, default=None,
         help="Output image path for positive direction "
-             "(default: results/<label-type>/validated-dino-precision-vs-threshold.png)")
+             "(default: results/<label-type>/precision-vs-threshold.svg)")
 
     parser.add_argument("--output-csv", type=Path, default=None,
         help="Output CSV path for positive direction "
-             "(default: results/<label-type>/validated-dino-thresholds-at-target-precision.csv)")
+             "(default: results/<label-type>/thresholds-at-target-precision.csv)")
 
     parser.add_argument("--skip-plot", action="store_true",
                         help="Skip graph generation and only write CSV summaries")
@@ -607,7 +607,7 @@ def main():
 
     parser.add_argument("--output-csv-deployment", type=Path, default=None,
                         help="Output CSV path for combined per-tag ADD/REMOVE/silent-zone deployment thresholds "
-                             "(default: results/<label-type>/validated-dino-deployment-thresholds.csv)")
+                             "(default: results/<label-type>/deployment-thresholds.csv)")
 
     args = parser.parse_args()
 
@@ -616,11 +616,11 @@ def main():
     if args.stats_file is None:
         args.stats_file = REPO_ROOT / f"results/{label_type}/validated-dino-inference-stats.json"
     if args.output_plot is None:
-        args.output_plot = REPO_ROOT / f"results/{label_type}/validated-dino-precision-vs-threshold.png"
+        args.output_plot = REPO_ROOT / f"results/{label_type}/precision-vs-threshold.svg"
     if args.output_csv is None:
-        args.output_csv = REPO_ROOT / f"results/{label_type}/validated-dino-thresholds-at-target-precision.csv"
+        args.output_csv = REPO_ROOT / f"results/{label_type}/thresholds-at-target-precision.csv"
     if args.output_csv_deployment is None:
-        args.output_csv_deployment = REPO_ROOT / f"results/{label_type}/validated-dino-deployment-thresholds.csv"
+        args.output_csv_deployment = REPO_ROOT / f"results/{label_type}/deployment-thresholds.csv"
 
     if not (0.0 <= args.target_precision <= 1.0):
         raise ValueError("--target-precision must be between 0 and 1")
