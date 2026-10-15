@@ -1,0 +1,12 @@
+b3d6c3307f3b49489bc6ac533c7cd776ee79516f97b7b017b3d08e8745e85f2f  models/unvalidated-dino-cls-b-crosswalk-tags-best.pth
+e9d8cf4cf7366c3c0164f3240e4f58f7ab661e3b07508128266e0a8ee1729149  models/unvalidated-dino-cls-b-curbramp-tags-best.pth
+b70355a27f6d5eb9bbfdabcc3c4529b75f34b35487d40b4908a885fc2b3314cb  models/unvalidated-dino-cls-b-obstacle-tags-best.pth
+95d5e50df7586948aba1f037111a99db6d003ebc2bfaeb5e6aeede295c0812c3  models/unvalidated-dino-cls-b-surfaceproblem-tags-best.pth
+aad6bb5bc1db4e12e46e7176e56bd57d24ba4aefe6ffcf0fc275c2d5f6f58854  models/validated-clip-cls-b-crosswalk-tags-best.pth
+9e691f8db41b4e23c2a8403f0c72001632225dc8a4ea0ae2c4acaae2738a6b54  models/validated-clip-cls-b-curbramp-tags-best.pth
+9004b040c30ad01e97dca1fc019dfa5e29b7493ed078097a75f2c0b4150ffced  models/validated-clip-cls-b-obstacle-tags-best.pth
+d5af1350e7a25669109971c222320f3bccc995a562a4d6a51588ea7c205cdb7a  models/validated-clip-cls-b-surfaceproblem-tags-best.pth
+2399313abc4b462fa9a708695f6febd05d0bd199e1f7f715af55ee312e618f55  models/validated-dino-cls-b-crosswalk-tags-best.pth
+4d00193aed73fc199049f31cebade51f236bfca92ad9f76adf08a9d08a272833  models/validated-dino-cls-b-curbramp-tags-best.pth
+da4f7ae0bb21d1a5b13a785ebc8553dcd8746eb823183f5c53332fe078009b6d  models/validated-dino-cls-b-obstacle-tags-best.pth
+be88b422572a783922fa13f9b63009d5753d7c17039928375fb2c1d0fd4aa335  models/validated-dino-cls-b-surfaceproblem-tags-best.pth
