@@ -10,9 +10,10 @@ MODELS_REV=65959dbc80b87e4f39385204c4b639cbcf58e1a8
 for f in $(cut -d/ -f2 models.sha256); do
   wget -c -O "models/$f" "https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/$MODELS_REV/$f"
 done
-shasum -a 256 -c models.sha256
+sha256sum -c models.sha256  # on macOS: shasum -a 256 -c models.sha256
 cd ..
 ```
+If any file is reported `FAILED`, delete it and rerun the commands above; `wget -c` won't replace a file that's already full size.
 ## 2. Setup Conda Environment
 Make sure your system has NVIDIA drivers and CUDA installed and then run the commands below. If you're on a Mac, you'll likely need to remove the `xformers` and `cuml-cu11` lines from `requirements.txt`.
 ```bash
