@@ -1,25 +1,19 @@
 # Reproduce Results
 This is a guide for how to reproduce the results published in the paper.
 ## 1. Download the pretrained models
+The model URLs below, and the dataset URLs in `download_and_process_test_dataset.sh`, are pinned to the HuggingFace commits where the paper's models and dataset were published, so later uploads to those repos won't change the results. Both also check each file's sha256 against the hash HuggingFace publishes for it.
 ```bash
-wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_reg4_pretrain.pth
-mkdir notebooks/models
-cd notebooks/models
-alias wget='wget --content-disposition'  # Makes sure that file names don't include "?download=true" at the end.
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-crosswalk-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-curbramp-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-obstacle-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/unvalidated-dino-cls-b-surfaceproblem-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-crosswalk-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-curbramp-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-obstacle-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-clip-cls-b-surfaceproblem-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-crosswalk-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-curbramp-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-obstacle-tags-best.pth?download=true
-wget https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/main/validated-dino-cls-b-surfaceproblem-tags-best.pth?download=true
-cd ../..
+wget -c https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_reg4_pretrain.pth
+mkdir -p notebooks/models
+cd notebooks
+MODELS_REV=65959dbc80b87e4f39385204c4b639cbcf58e1a8
+for f in $(cut -d/ -f2 models.sha256); do
+  wget -c -O "models/$f" "https://huggingface.co/projectsidewalk/sidewalk-tagger-ai-models/resolve/$MODELS_REV/$f"
+done
+sha256sum -c models.sha256  # on macOS: shasum -a 256 -c models.sha256
+cd ..
 ```
+If any file is reported `FAILED`, delete it and rerun the commands above; `wget -c` won't replace a file that's already full size.
 ## 2. Setup Conda Environment
 Make sure your system has NVIDIA drivers and CUDA installed and then run the commands below. If you're on a Mac, you'll likely need to remove the `xformers` and `cuml-cu11` lines from `requirements.txt`.
 ```bash
